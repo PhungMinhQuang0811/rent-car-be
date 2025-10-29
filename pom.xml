@@ -108,6 +108,11 @@
 			<artifactId>s3</artifactId>
 			<version>${amazon-sdk-s3.version}</version>
 		</dependency>
+        <dependency>
+            <groupId>com.cloudinary</groupId>
+            <artifactId>cloudinary-http44</artifactId>
+            <version>1.39.0</version>
+        </dependency>
 
 		<!-- lombok and mapstruct -->
 		<dependency>
@@ -139,7 +144,7 @@
 			<groupId>org.springdoc</groupId>
 			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
 			<version>${springdoc.version}</version>
-			<scope>provided</scope>
+<!--			<scope>provided</scope>-->
 		</dependency>
 
 		<!-- test -->
@@ -154,7 +159,7 @@
 			<scope>test</scope>
 		</dependency>
 
-	</dependencies>
+    </dependencies>
 
 	<build>
 		<plugins>
