@@ -85,11 +85,13 @@ public class SecurityConfig{
                     @Override
                     public CorsConfiguration getCorsConfiguration(HttpServletRequest request) {
                         CorsConfiguration config = new CorsConfiguration();
-                        config.setAllowedOrigins(getAllowCorsUrl());
+//                        config.setAllowedOrigins(getAllowCorsUrl()); //
+                        config.setAllowedOriginPatterns(Collections.singletonList("*")); // only for prm
                         config.setAllowedMethods(Collections.singletonList("*"));
                         config.setAllowedHeaders(Collections.singletonList("*"));
                         config.setExposedHeaders(Collections.singletonList("Authorization"));
-                        config.setAllowCredentials(true);
+//                        config.setAllowCredentials(true);
+                        config.setAllowCredentials(false); // only for prm
                         return config;
                     }
                 }))
