@@ -90,8 +90,7 @@ public class SecurityConfig{
                         config.setAllowedMethods(Collections.singletonList("*"));
                         config.setAllowedHeaders(Collections.singletonList("*"));
                         config.setExposedHeaders(Collections.singletonList("Authorization"));
-//                        config.setAllowCredentials(true);
-                        config.setAllowCredentials(false); // only for prm
+                        config.setAllowCredentials(true);
                         return config;
                     }
                 }))
