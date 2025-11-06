@@ -267,12 +267,15 @@ public class AuthenticationService {
     private ResponseCookie generateCookie(String cookieName, String cookieValue, String path, long maxAgeMiliseconds, boolean isHttpOnly) {
         return ResponseCookie
                 .from(cookieName, cookieValue)
-                .path(path)
-                .domain(domain)
+//                .path(path)
+                .path("/")
+//                .domain(domain)
                 .maxAge(maxAgeMiliseconds / 1000) // seconds ~ 1days
                 .httpOnly(isHttpOnly)
-                .secure(true)
-                .sameSite("None")
+//                .secure(true)
+                .secure(false)
+//                .sameSite("None")
+                .sameSite("Lax")
                 .build();
     }
 
