@@ -90,6 +90,14 @@ public class BookingService {
         // Map the booking request to a Booking entity.
         Booking booking = bookingMapper.toBooking(createBookingRequest);
         booking.setBookingNumber(redisUtil.generateBookingNumber());
+        
+        // Construct pickUpLocation from car entity (backend has access to full address)
+        // Format: "City, District, Ward, House number and street"
+        String pickUpLocation = car.getCityProvince() + ", " + 
+                                car.getDistrict() + ", " + 
+                                car.getWard() + ", " + 
+                                car.getHouseNumberStreet();
+        booking.setPickUpLocation(pickUpLocation);
 
         // Upload the driver's license to S3 storage.
         String drivingLicenseKey;
@@ -129,18 +137,20 @@ public class BookingService {
         booking.setBasePrice(car.getBasePrice());
         booking.setUpdateBy(SecurityUtil.getCurrentAccountId());
 
+        // Save the booking to the database first (so account relationship is persisted)
+        bookingRepository.save(booking);
+        
         // Handle paying deposit.
         if (booking.getPaymentType().equals(EPaymentType.WALLET)
                 && walletCustomer.getBalance() >= car.getDeposit()) {
             // If the customer using wallet and has enough balance in the wallet
-            payBookingDepositUsingWallet(booking);
+            payBookingDepositUsingWallet(booking, customerAccountId);
         } else {
             // the customer not using wallet to pay deposit or the wallet's balance is not enough
             booking.setStatus(EBookingStatus.PENDING_DEPOSIT);
             redisUtil.cachePendingDepositBooking(booking.getBookingNumber());
+            bookingRepository.save(booking);
         }
-        // Save the booking to the database.
-        bookingRepository.save(booking);
 
         return buildBookingResponse(booking, drivingLicenseKey);
     }
@@ -177,9 +187,10 @@ public class BookingService {
      * @param booking The booking for which the deposit payment is being processed.
      * @throws AppException If email notifications fail to send.
      */
-    private void payBookingDepositUsingWallet(Booking booking) {
+    private void payBookingDepositUsingWallet(Booking booking, String customerAccountId) {
         // Process the deposit payment and update the booking status
-        transactionService.payDeposit(booking);
+        // Pass customerAccountId directly to avoid issues with booking.getAccount().getId() before booking is saved
+        transactionService.payDeposit(booking, customerAccountId);
         handleBookingConfirmation(booking);
     }
 
@@ -404,7 +415,8 @@ public class BookingService {
      * @return the profile with full information
      */
     private boolean isProfileComplete(UserProfile profile) {
-        return Stream.of(
+        // Check all required fields including DOB (needed when renter is driver)
+        boolean hasAllRequiredFields = Stream.of(
                 profile.getNationalId(),
                 profile.getDrivingLicenseUri(),
                 profile.getPhoneNumber(),
@@ -414,6 +426,9 @@ public class BookingService {
                 profile.getHouseNumberStreet(),
                 profile.getFullName()
         ).noneMatch(this::isNullOrEmpty);
+        
+        // Also check DOB is not null (required when renter is driver)
+        return hasAllRequiredFields && profile.getDob() != null;
     }
 
 
@@ -730,7 +745,6 @@ public class BookingService {
 
         EBookingStatus bookingStatus = booking.getStatus();
         String carName = booking.getCar().getBrand() + " " + booking.getCar().getModel();
-        String customerId = SecurityUtil.getCurrentAccountId();
 
         // If the booking is in WAITING_CONFIRMED status, refund the full deposit to the customer
         if (bookingStatus == EBookingStatus.WAITING_CONFIRMED) {
@@ -943,8 +957,9 @@ public class BookingService {
             throw new AppException(ErrorCode.UNSUPPORTED_PAYMENT_TYPE);
         }
         booking.setUpdateBy(SecurityUtil.getCurrentAccount().getId());
-        //pay deposit again
-        payBookingDepositUsingWallet(booking);
+        //pay deposit again - use account ID from booking since it's already saved
+        String customerAccountId = booking.getAccount().getId();
+        payBookingDepositUsingWallet(booking, customerAccountId);
         return buildBookingResponse(booking, booking.getDriverDrivingLicenseUri());
     }
 

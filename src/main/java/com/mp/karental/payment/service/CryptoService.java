@@ -41,7 +41,8 @@ public class CryptoService {
 
     public String sign(String data) {
         try {
-            return toHexString(mac.doFinal(data.getBytes()));
+            // Use UTF-8 encoding for hash calculation as per VNPay documentation
+            return toHexString(mac.doFinal(data.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         } catch (Exception e) {
             throw new AppException(ErrorCode.VNPAY_SIGNING_FAILED);
         }

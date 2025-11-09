@@ -122,7 +122,7 @@ public class TransactionService {
 
     }
 
-    //get the transaction status after vnpay process
+    //get the transaction status after vnpay process (requires authentication - used by frontend)
     public TransactionResponse getTransactionStatus(String transactionId, Map<String,String> params) {
         log.info("Checking Transaction Status: transactionId={}, params={}", transactionId, params);
         IpnResponse ipnResponse = ipnHandler.process(params);
@@ -165,6 +165,54 @@ public class TransactionService {
         return transactionResponse;
     }
 
+    // Process transaction from VNPay return URL (no authentication required - used by PaymentController)
+    public void processTransactionFromReturnUrl(String transactionId, Map<String, String> params) {
+        log.info("Processing Transaction from Return URL: transactionId={}, params={}", transactionId, params);
+        IpnResponse ipnResponse = ipnHandler.process(params);
+        Transaction transaction = transactionRepository.findById(transactionId)
+                .orElseThrow(() -> new AppException(ErrorCode.TRANSACTION_NOT_FOUND_IN_DB));
+        
+        // Get wallet and account from transaction (no authentication needed)
+        Wallet wallet = transaction.getWallet();
+        if (wallet == null) {
+            throw new AppException(ErrorCode.WALLET_NOT_FOUND_IN_DB);
+        }
+        Account account = wallet.getAccount();
+        if (account == null) {
+            throw new AppException(ErrorCode.WALLET_NOT_FOUND_IN_DB);
+        }
+        
+        // if current transaction status is PROCESSING
+        if (!transaction.getStatus().equals(ETransactionStatus.SUCCESSFUL) &&
+                !transaction.getStatus().equals(ETransactionStatus.FAILED)) {
+            // if response from vnpay returnUrl is success
+            if (ipnResponse.getResponseCode().equals(VNPayIPNResponseConst.SUCCESS.getResponseCode())) {
+                if (transaction.getType().equals(ETransactionType.TOP_UP)) {
+                    // update transaction status to SUCCESSFUL
+                    transaction.setStatus(ETransactionStatus.SUCCESSFUL);
+                    log.info("Updating transaction to SUCCESSFUL: transactionId={}", transaction.getId());
+                    // set balance for wallet
+                    wallet.setBalance(wallet.getBalance() + transaction.getAmount());
+                    //send email if top-up successfully
+                    emailService.sendWalletUpdateEmail(account.getEmail(), walletUrl);
+                    redisUtil.removeCacheProcessingTransaction(transaction.getId());
+                }
+                //save balance
+                walletRepository.save(wallet);
+            }
+            // if vnpay response is failed
+            else {
+                //update transaction status to FAILED
+                transaction.setStatus(ETransactionStatus.FAILED);
+                log.warn("Transaction failed: transactionId={}, responseCode={}", transactionId, ipnResponse.getResponseCode());
+            }
+            // save transaction status to db
+            transactionRepository.save(transaction);
+        } else {
+            log.info("Transaction already processed: transactionId={}, status={}", transactionId, transaction.getStatus());
+        }
+    }
+
     // Method to transfer money from admin wallet to user wallet (include customer and car owner)
     private Wallet transferFromSystemToUser(String userId, long amount){
         Wallet userWallet = walletRepository.findById(userId)
@@ -202,10 +250,10 @@ public class TransactionService {
     }
 
     // method serves as third-party, customer will transfer money from wallet to admin wallet when pay deposit
-    public void payDeposit(Booking b ){
-        String customerId = b.getAccount().getId();
+    public void payDeposit(Booking b, String customerAccountId){
+        // Use customerAccountId directly instead of b.getAccount().getId() to ensure we use the correct account ID
         // customer pay for system
-        Wallet customerWallet =  transferFromUserToSystem(customerId,b.getDeposit());
+        Wallet customerWallet =  transferFromUserToSystem(customerAccountId, b.getDeposit());
         // save as new transaction
         Transaction transaction = Transaction.builder()
                 .type(ETransactionType.PAY_DEPOSIT)

@@ -13,8 +13,9 @@ application:
       /v3/api-docs.yaml,
       /swagger-config,
       /swagger-resources/**,
-      /homepage/**
-      "
+      /homepage/**,
+      /api/v1/payments/vnpay_ipn,
+      /api/v1/payments/vnpay_return/**"
 springdoc:
   swagger-ui:
     enabled: true

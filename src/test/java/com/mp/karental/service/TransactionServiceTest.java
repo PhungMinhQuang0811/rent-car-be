@@ -234,7 +234,7 @@ public class TransactionServiceTest {
         when(walletRepository.findById(adminAccount.getId())).thenReturn(Optional.of(adminWallet));
 
         // Act
-        transactionService.payDeposit(booking);
+        transactionService.payDeposit(booking, loggedInUser.getId());
 
         // Assert
         assertEquals(8000000, loggedInUser.getBalance());

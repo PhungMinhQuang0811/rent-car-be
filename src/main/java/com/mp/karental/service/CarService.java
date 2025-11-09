@@ -31,7 +31,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.Sort;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.*;
 
 /**
@@ -461,6 +463,35 @@ public class CarService {
             throw new AppException(ErrorCode.INVALID_DATE_RANGE);
         }
 
+        // Validate booking time requirements (don't throw error, but mark as unavailable if invalid)
+        // This allows users to see car details even with invalid times, but understand why it's not available
+        LocalDateTime now = LocalDateTime.now();
+        boolean hasValidBookingTime = true;
+        
+        // Check if pickup time is at least 2 hours from now
+        if (request.getPickUpTime().isBefore(now.plusHours(2))) {
+            log.info("Pick-up time is less than 2 hours from now - PickUp: {}, Current time: {}, Minimum required: {}, accessBy {}", 
+                    request.getPickUpTime(), now, now.plusHours(2), accountId);
+            hasValidBookingTime = false;
+        }
+        
+        // Check if pickup time is within allowed hours (06:00 - 22:00)
+        LocalTime pickUpTime = request.getPickUpTime().toLocalTime();
+        LocalTime PICKUP_START_TIME = LocalTime.of(6, 0);
+        LocalTime PICKUP_END_TIME = LocalTime.of(22, 0);
+        if (pickUpTime.isBefore(PICKUP_START_TIME) || pickUpTime.isAfter(PICKUP_END_TIME)) {
+            log.info("Pick-up time is outside allowed hours - PickUp time: {}, Allowed range: {} - {}, accessBy {}", 
+                    pickUpTime, PICKUP_START_TIME, PICKUP_END_TIME, accountId);
+            hasValidBookingTime = false;
+        }
+        
+        // Check if drop-off time is at least 2 hours after pick-up time
+        if (request.getPickUpTime().isAfter(request.getDropOffTime().minusHours(2))) {
+            log.info("Booking duration is less than 2 hours - PickUp: {}, DropOff: {}, Minimum duration: 2 hours, accessBy {}", 
+                    request.getPickUpTime(), request.getDropOffTime(), accountId);
+            hasValidBookingTime = false;
+        }
+
         // Retrieve car details from the database
         Car car = carRepository.findById(request.getCarId())
                 .orElseThrow(() -> {
@@ -476,8 +507,15 @@ public class CarService {
             throw new AppException(ErrorCode.CAR_NOT_VERIFIED);
         }
 
-        //Check car is available
-        boolean isAvailable = isCarAvailable(request.getCarId(), request.getPickUpTime(), request.getDropOffTime());
+        //Check car is available (only if booking time is valid)
+        boolean isAvailable = false;
+        if (hasValidBookingTime) {
+            isAvailable = isCarAvailable(request.getCarId(), request.getPickUpTime(), request.getDropOffTime());
+        } else {
+            // If booking time is invalid, car is not available regardless of bookings
+            log.info("Car marked as unavailable due to invalid booking time requirements, carId: {}, accessBy {}", 
+                    request.getCarId(), accountId);
+        }
 
         // Map the car entity to a CarDetailResponse DTO
         CarDetailResponse response = carMapper.toCarDetailResponse(car, isAvailable);
@@ -541,26 +579,68 @@ public class CarService {
      * @return true if the car is available, false otherwise
      */
     public boolean isCarAvailable(String carId, LocalDateTime pickUpTime, LocalDateTime dropOffTime) {
-        // Get list booking in range (pickUp - 1 day) to (dropOff + 1 day)
+        // Get list booking in range (pickUp - 1 day) to (dropOff + 1 day) to catch any potential overlaps
         LocalDateTime searchStart = pickUpTime.minusDays(1);
         LocalDateTime searchEnd = dropOffTime.plusDays(1);
 
         List<Booking> bookings = bookingRepository.findActiveBookingsByCarIdAndTimeRange(carId, searchStart, searchEnd);
-        log.info("Checking availability for Car ID: {} - Search range: {} to {}", carId, searchStart, searchEnd);
+        log.info("Checking availability for Car ID: {} - PickUp: {}, DropOff: {}, Search range: {} to {}, Found {} bookings", 
+                carId, pickUpTime, dropOffTime, searchStart, searchEnd, bookings.size());
+        
         //check car if status is different with VERIFIED, the car is not available
         Car car = carRepository.findById(carId)
                 .orElseThrow(() -> new AppException(ErrorCode.CAR_NOT_FOUND_IN_DB));
         if(car.getStatus() != ECarStatus.VERIFIED) {
+            log.info("Car {} is not available - Status: {}", carId, car.getStatus());
             return false;
         }
-        // If there isn't any booking -> Available
-        if (bookings.isEmpty()) {
+        
+        // Filter bookings to only those that actually overlap with the requested time range
+        // Two time ranges overlap if: (pickUpTime < booking.dropOffTime AND dropOffTime > booking.pickUpTime)
+        List<Booking> overlappingBookings = bookings.stream()
+                .filter(booking -> {
+                    boolean overlaps = pickUpTime.isBefore(booking.getDropOffTime()) 
+                            && dropOffTime.isAfter(booking.getPickUpTime());
+                    if (overlaps) {
+                        log.info("Found overlapping booking for Car {} - Booking Number: {}, Status: {}, PickUp: {}, DropOff: {}", 
+                                carId, booking.getBookingNumber(), booking.getStatus(), 
+                                booking.getPickUpTime(), booking.getDropOffTime());
+                    }
+                    return overlaps;
+                })
+                .collect(java.util.stream.Collectors.toList());
+        
+        log.info("Car {} - Found {} bookings in search range, {} actually overlap with requested time", 
+                carId, bookings.size(), overlappingBookings.size());
+        
+        // If there are no overlapping bookings -> Available
+        if (overlappingBookings.isEmpty()) {
+            log.info("Car {} is available - No overlapping bookings found", carId);
             return true;
         }
-        // Check whether all booking is CANCELED OR  PENDING_DEPOSIT
-        return bookings.stream()
+        
+        // Check whether all overlapping bookings are CANCELED OR PENDING_DEPOSIT (inactive)
+        boolean allInactive = overlappingBookings.stream()
                 .allMatch(booking -> booking.getStatus() == EBookingStatus.CANCELLED
                         || booking.getStatus() == EBookingStatus.PENDING_DEPOSIT);
+        
+        if (allInactive) {
+            log.info("Car {} is available - All {} overlapping bookings are inactive (CANCELLED or PENDING_DEPOSIT)", 
+                    carId, overlappingBookings.size());
+        } else {
+            List<Booking> activeBookings = overlappingBookings.stream()
+                    .filter(booking -> booking.getStatus() != EBookingStatus.CANCELLED 
+                            && booking.getStatus() != EBookingStatus.PENDING_DEPOSIT)
+                    .collect(java.util.stream.Collectors.toList());
+            log.info("Car {} is not available - Found {} active bookings that conflict: {}", 
+                    carId, activeBookings.size(), 
+                    activeBookings.stream()
+                            .map(b -> String.format("%s (Status: %s, %s to %s)", 
+                                    b.getBookingNumber(), b.getStatus(), b.getPickUpTime(), b.getDropOffTime()))
+                            .collect(java.util.stream.Collectors.joining(", ")));
+        }
+        
+        return allInactive;
     }
 
 
@@ -633,6 +713,47 @@ public class CarService {
     public Page<CarThumbnailResponse> searchCars(SearchCarRequest request, int page, int size, String sort) {
         log.info("Search request received - Address: {}, PickUp: {}, DropOff: {}",
                 request.getAddress(), request.getPickUpTime(), request.getDropOffTime());
+
+        // Validate that pick-up date is before drop-off date
+        if (request.getPickUpTime().isAfter(request.getDropOffTime())) {
+            log.info("Invalid date range in search request - PickUp: {}, DropOff: {}", 
+                    request.getPickUpTime(), request.getDropOffTime());
+            throw new AppException(ErrorCode.INVALID_DATE_RANGE);
+        }
+
+        // Validate pick-up time: must be at least 2 hours from now (same as booking validation)
+        LocalDateTime now = LocalDateTime.now();
+        if (request.getPickUpTime().isBefore(now.plusHours(2))) {
+            log.info("Invalid pick-up time in search request - PickUp: {}, Current time: {}, Minimum required: {}", 
+                    request.getPickUpTime(), now, now.plusHours(2));
+            throw new AppException(ErrorCode.INVALID_BOOKING_TIME);
+        }
+
+        // Validate that pick-up time is not more than 60 days in the future
+        LocalDate today = now.toLocalDate();
+        LocalDate pickUpDate = request.getPickUpTime().toLocalDate();
+        if (pickUpDate.isAfter(today.plusDays(60))) {
+            log.info("Invalid pick-up time in search request - PickUp date: {}, Maximum allowed: {}", 
+                    pickUpDate, today.plusDays(60));
+            throw new AppException(ErrorCode.INVALID_BOOKING_TIME);
+        }
+
+        // Validate pick-up time is within allowed hours (06:00 - 22:00)
+        LocalTime pickUpTime = request.getPickUpTime().toLocalTime();
+        LocalTime PICKUP_START_TIME = LocalTime.of(6, 0);
+        LocalTime PICKUP_END_TIME = LocalTime.of(22, 0);
+        if (pickUpTime.isBefore(PICKUP_START_TIME) || pickUpTime.isAfter(PICKUP_END_TIME)) {
+            log.info("Invalid pick-up time in search request - PickUp time: {}, Allowed range: {} - {}", 
+                    pickUpTime, PICKUP_START_TIME, PICKUP_END_TIME);
+            throw new AppException(ErrorCode.INVALID_BOOKING_TIME);
+        }
+
+        // Validate that drop-off time is at least 2 hours after pick-up time
+        if (request.getPickUpTime().isAfter(request.getDropOffTime().minusHours(2))) {
+            log.info("Invalid booking duration in search request - PickUp: {}, DropOff: {}, Minimum duration: 2 hours", 
+                    request.getPickUpTime(), request.getDropOffTime());
+            throw new AppException(ErrorCode.INVALID_BOOKING_TIME);
+        }
 
         // Get list car is VERIFIED with pagination
         List<Car> verifiedCars = carRepository.findVerifiedCarsByAddress(ECarStatus.VERIFIED, request.getAddress());

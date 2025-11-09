@@ -56,8 +56,8 @@ public class VNPayService implements PaymentService{
         var amount = request.getAmount() * DEFAULT_MULTIPLIER;  // 1. amount * 100
         var txnRef = request.getTxnRef();                       // 2. transactionId
         var returnUrl = buildReturnUrl(txnRef);                 // 3. FE redirect by returnUrl
-        var vnCalendar = Calendar.getInstance(TimeZone.getTimeZone("Etc/GMT+7"));
-        vnCalendar.add(Calendar.HOUR_OF_DAY, 7); // Add 7 hours
+        // Get current time in Vietnam timezone (GMT+7) - DO NOT add 7 hours as calendar is already in GMT+7
+        var vnCalendar = Calendar.getInstance(TimeZone.getTimeZone("Asia/Ho_Chi_Minh"));
         var createdDate = DateUtils.formatVnTime(vnCalendar);
         vnCalendar.add(Calendar.MINUTE, paymentTimeout);
         var expiredDate = DateUtils.formatVnTime(vnCalendar);    // 4. expiredDate for secure
@@ -80,7 +80,7 @@ public class VNPayService implements PaymentService{
         params.put(VNPayParams.EXPIRE_DATE, expiredDate);
 
         params.put(VNPayParams.IP_ADDRESS, ipAddress);
-        params.put(VNPayParams.LOCALE, "en");
+        params.put(VNPayParams.LOCALE, "vn");
        // params.put(VNPayParams.BANK_CODE, "VNPAYQR");
         params.put(VNPayParams.ORDER_INFO, orderInfo);
         params.put(VNPayParams.ORDER_TYPE, ORDER_TYPE);

@@ -66,4 +66,13 @@ public class CarThumbnailResponse {
 
     @Schema(description = "Last updated timestamp of the car details", example = "2024-03-28T15:30:00")
     private LocalDateTime updatedAt;
+
+    @Schema(description = "Number of seats in the car", example = "5")
+    private int numberOfSeats;
+
+    @Schema(description = "Whether the car has automatic transmission", example = "true")
+    private boolean isAutomatic;
+
+    @Schema(description = "Whether the car uses gasoline fuel", example = "true")
+    private boolean isGasoline;
 }

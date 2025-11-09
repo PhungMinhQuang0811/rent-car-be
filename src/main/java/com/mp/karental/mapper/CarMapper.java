@@ -62,7 +62,6 @@ public interface CarMapper {
 
     /**
      * Converts a Car entity into a CarResponse DTO.
-     * Maps 'automatic' to 'isAutomatic' and 'gasoline' to 'isGasoline'.
      *
      * @param car The Car entity to be converted.
      * @return A CarResponse DTO containing mapped car details.
@@ -79,6 +78,8 @@ public interface CarMapper {
      * @return CarThumbnailResponse containing car details.
      */
     @Mapping(target = "address", ignore = true)
+    @Mapping(target = "isAutomatic", source = "automatic")
+    @Mapping(target = "isGasoline", source = "gasoline")
     CarThumbnailResponse toCarThumbnailResponse(Car car);
 
     /**
@@ -94,6 +95,8 @@ public interface CarMapper {
     @Mapping(target = "registrationPaperUrl", ignore = true)
     @Mapping(target = "certificateOfInspectionUrl", ignore = true)
     @Mapping(target = "insuranceUrl", ignore = true)
+    @Mapping(target = "isAutomatic", source = "car.automatic")
+    @Mapping(target = "isGasoline", source = "car.gasoline")
     CarDetailResponse toCarDetailResponse(Car car, boolean isAvailable);
 
     /**
@@ -109,6 +112,8 @@ public interface CarMapper {
     @Mapping(target = "carImageBack", ignore = true)
     @Mapping(target = "carImageLeft", ignore = true)
     @Mapping(target = "carImageRight", ignore = true)
+    @Mapping(target = "isAutomatic", source = "car.automatic")
+    @Mapping(target = "isGasoline", source = "car.gasoline")
     CarThumbnailResponse toSearchCar(Car car, long noOfRides);
 
     /**

@@ -13,7 +13,7 @@ application:
       refresh-token-cookie-name: karental-jwt-refresh
       refresh-token-secret-key: ${JWT_REFRESH_SECRET_KEY}
       access-token-expiration: 3600000  #milisecond ~ 1 hours
-      refresh-token-expiration: 86400000 #~1day
+      refresh-token-expiration: 432000000 #~5day
       csrf-token-cookie-name: karental-jwt-csrf
       csrf-token-secret-key: ${JWT_CSRF_SECRET_KEY}
       csrf-token-header-name: X-CSRF-TOKEN
@@ -25,7 +25,9 @@ application:
       /user/resend-verify-email/**,
       /user/verify-email/**,
       /auth/**,
-      /homepage/**"
+      /homepage/**,
+      /api/v1/payments/vnpay_ipn,
+      /api/v1/payments/vnpay_return/**"
 ##      FOR TEST
 
 front-end:
@@ -93,5 +95,6 @@ payment:
     tmn-code: ${TMN_CODE}
     secret-key: ${VNPAY_SECRET_KEY}
     init-payment-url: https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
-    return-url: http://localhost:3000/#/my-wallet
+    return-url: http://localhost:8080/karental/api/v1/payments/vnpay_return/%s
+    ipn-url: http://localhost:8080/karental/api/v1/payments/vnpay_ipn
     timeout: 15 # in minutes

@@ -9,9 +9,9 @@ import java.util.TimeZone;
 
 public class DateUtils {
     protected static final SimpleDateFormat ISO_DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd");
-    protected static final SimpleDateFormat VNPAY_DATE_FORMAT = new SimpleDateFormat("yyyyMMddHHmmss");
-    public static final Calendar VN_CALENDAR = Calendar.getInstance(TimeZone.getTimeZone("Etc/GMT+7"));
-
+    // Use Asia/Ho_Chi_Minh timezone for Vietnam (GMT+7)
+    private static final TimeZone VIETNAM_TIMEZONE = TimeZone.getTimeZone("Asia/Ho_Chi_Minh");
+    
     public static Date parseISO(String date) {
         try {
             return ISO_DATE_FORMAT.parse(date);
@@ -29,11 +29,26 @@ public class DateUtils {
     }
 
     public static String getVnTime() {
-        return VNPAY_DATE_FORMAT.format(VN_CALENDAR.getTime());
+        Calendar calendar = Calendar.getInstance(VIETNAM_TIMEZONE);
+        SimpleDateFormat formatter = new SimpleDateFormat("yyyyMMddHHmmss");
+        formatter.setTimeZone(VIETNAM_TIMEZONE);
+        return formatter.format(calendar.getTime());
     }
 
     public static String formatVnTime(Calendar calendar) {
-        return VNPAY_DATE_FORMAT.format(calendar.getTime());
+        // Ensure the calendar timezone is set correctly
+        if (calendar.getTimeZone().getID().equals(VIETNAM_TIMEZONE.getID())) {
+            SimpleDateFormat formatter = new SimpleDateFormat("yyyyMMddHHmmss");
+            formatter.setTimeZone(VIETNAM_TIMEZONE);
+            return formatter.format(calendar.getTime());
+        } else {
+            // If calendar is in different timezone, convert it
+            Calendar vnCalendar = Calendar.getInstance(VIETNAM_TIMEZONE);
+            vnCalendar.setTimeInMillis(calendar.getTimeInMillis());
+            SimpleDateFormat formatter = new SimpleDateFormat("yyyyMMddHHmmss");
+            formatter.setTimeZone(VIETNAM_TIMEZONE);
+            return formatter.format(vnCalendar.getTime());
+        }
     }
 
 //    public static void main(String[] agrs) {

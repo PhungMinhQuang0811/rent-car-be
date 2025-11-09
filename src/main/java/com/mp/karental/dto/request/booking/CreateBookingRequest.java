@@ -4,9 +4,6 @@ import com.mp.karental.constant.EPaymentType;
 import com.mp.karental.validation.*;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Past;
-import jakarta.validation.constraints.Pattern;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 import org.hibernate.annotations.CreationTimestamp;
@@ -32,6 +29,7 @@ import java.time.LocalDateTime;
 @Builder
 @ValidBookingTime(message = "INVALID_BOOKING_TIME")
 @ValidAddressComponent(message = "INVALID_ADDRESS_COMPONENT")
+@ValidDriverDob(min = 18, message = "INVALID_DATE_OF_BIRTH")
 @Schema(name = "request.booking.CreateBookingRequest", description = "DTO contain necessary information to make a car")
 public class CreateBookingRequest {
     @RequiredField(fieldName = "Car id")
@@ -42,8 +40,9 @@ public class CreateBookingRequest {
     @Schema(example = "2004-11-08T07:00:00", description = "The timestamp when the booking was created")
     LocalDateTime createdAt;
 
-    @ValidAddress(message = "INVALID_ADDRESS")
-    @Schema(example = "Tỉnh Hà Giang, Thành phố Hà Giang, Phường Quang Trung, 211 Trần Duy Hưng", description = "The pickup location for the car rental")
+    // Note: pickUpLocation validation is skipped - backend constructs it from car entity
+    // @ValidAddress annotation removed since backend has access to car's full address
+    @Schema(example = "Tỉnh Hà Giang, Thành phố Hà Giang, Phường Quang Trung, 211 Trần Duy Hưng", description = "The pickup location for the car rental (constructed from car entity on backend)")
     String pickUpLocation;
 
     @Schema(example = "2004-11-08T09:00:00", description = "The pickup time for the rental car")
@@ -67,8 +66,9 @@ public class CreateBookingRequest {
     @Schema(example = "A123456789", description = "The national ID of the driver")
     String driverNationalId;
 
-    @ValidAge(min = 18)
-    @Schema(example = "2004-11-08", description = "The date of birth of the driver (must be at least 18 years old)")
+    // Note: driverDob validation is conditional - only validated when isDriver = true
+    // When isDriver = false, backend uses account profile DOB
+    @Schema(example = "2004-11-08", description = "The date of birth of the driver (must be at least 18 years old, required only when isDriver = true)")
     LocalDate driverDob;
 
     @Email(message = "INVALID_EMAIL")
