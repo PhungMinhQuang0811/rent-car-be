@@ -95,6 +95,9 @@ payment:
     tmn-code: ${TMN_CODE}
     secret-key: ${VNPAY_SECRET_KEY}
     init-payment-url: https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
-    return-url: http://localhost:8080/karental/api/v1/payments/vnpay_return/%s
-    ipn-url: http://localhost:8080/karental/api/v1/payments/vnpay_ipn
+    # IMPORTANT: Return URL and IPN URL must be publicly accessible!
+    # For local development, use ngrok or similar tunneling service
+    # Example: https://your-ngrok-url.ngrok.io/karental/api/v1/payments/vnpay_return/%s
+    return-url: ${VNPAY_RETURN_URL:https://unturbaned-untaxing-micki.ngrok-free.dev/karental/api/v1/payments/vnpay_return/%s}
     timeout: 15 # in minutes
+    # Bank code is not configured - VNPay will show payment method selection page to users

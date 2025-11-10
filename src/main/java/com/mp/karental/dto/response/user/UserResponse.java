@@ -23,6 +23,9 @@ import lombok.experimental.FieldDefaults;
 @Builder
 @Schema(name = "response.user.UserResponse", description = "Data of an user")
 public class UserResponse {
+    @Schema(description = "User's ID", example = "123e4567-e89b-12d3-a456-426614174000")
+    String id;
+
     @Schema(description = "User's full name", example = "Nguyễn Thị Bích")
     String fullName;
 

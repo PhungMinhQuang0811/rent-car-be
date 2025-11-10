@@ -125,43 +125,85 @@ public class TransactionService {
     //get the transaction status after vnpay process (requires authentication - used by frontend)
     public TransactionResponse getTransactionStatus(String transactionId, Map<String,String> params) {
         log.info("Checking Transaction Status: transactionId={}, params={}", transactionId, params);
-        IpnResponse ipnResponse = ipnHandler.process(params);
-        Transaction transaction = transactionRepository.findById(transactionId).orElseThrow(() -> new AppException(ErrorCode.TRANSACTION_NOT_FOUND_IN_DB));
+        
+        // Verify transaction belongs to the authenticated user
+        Transaction transaction = transactionRepository.findById(transactionId)
+                .orElseThrow(() -> new AppException(ErrorCode.TRANSACTION_NOT_FOUND_IN_DB));
         String accountId = SecurityUtil.getCurrentAccountId();
         Account currentUser = SecurityUtil.getCurrentAccount();
-        Wallet wallet = walletRepository.findById(accountId).orElseThrow(() -> new AppException(ErrorCode.WALLET_NOT_FOUND_IN_DB));
-        TransactionResponse transactionResponse = transactionMapper.toTransactionResponse(transaction);
-        log.info("Transaction Status: transactionResponse={}", transactionResponse);
-        // if current transaction status is PROCESSING
-        if (!transaction.getStatus().equals(ETransactionStatus.SUCCESSFUL) &&
-                !transaction.getStatus().equals(ETransactionStatus.FAILED)) {
-            // if response from vnpay returnUrl is success
-            if (ipnResponse.getResponseCode().equals(VNPayIPNResponseConst.SUCCESS.getResponseCode())) {
-                if (transaction.getType().equals(ETransactionType.TOP_UP)) {
-                    // update transaction status to SUCCESSFUL
-                    transactionResponse.setStatus(ETransactionStatus.SUCCESSFUL);
-                    transaction.setStatus(ETransactionStatus.SUCCESSFUL);
-                    log.info("Updating transaction to SUCCESSFUL: transactionId={}", transaction.getId());
-                    // set balance for wallet
-                    wallet.setBalance(wallet.getBalance() + transaction.getAmount());
-                    //send email if top-up successfully
-                    emailService.sendWalletUpdateEmail(currentUser.getEmail(), "http://localhost:3000/#/my-wallet");
-                    redisUtil.removeCacheProcessingTransaction(transaction.getId());
-                }
-                //save balance
-                walletRepository.save(wallet);
-            }
-            // if vnpay response is failed
-            else {
-                //update transaction status to FAILED
-                transactionResponse.setStatus(ETransactionStatus.FAILED);
-                transaction.setStatus(ETransactionStatus.FAILED);
-                //throw exception
-                throw new AppException(ErrorCode.VNPAY_PAYMENT_FAILED);
-            }
-            // save exception to db even if it's failed
-            transactionRepository.save(transaction);
+        
+        // Verify transaction belongs to current user
+        if (!transaction.getWallet().getAccount().getId().equals(accountId)) {
+            throw new AppException(ErrorCode.TRANSACTION_NOT_FOUND_IN_DB);
         }
+        
+        Wallet wallet = walletRepository.findById(accountId)
+                .orElseThrow(() -> new AppException(ErrorCode.WALLET_NOT_FOUND_IN_DB));
+        TransactionResponse transactionResponse = transactionMapper.toTransactionResponse(transaction);
+        
+        // If transaction is already processed, return current status
+        if (transaction.getStatus().equals(ETransactionStatus.SUCCESSFUL) ||
+                transaction.getStatus().equals(ETransactionStatus.FAILED)) {
+            log.info("Transaction already processed: transactionId={}, status={}", transactionId, transaction.getStatus());
+            return transactionResponse;
+        }
+        
+        // Filter out non-VNPay parameters (from frontend redirect like status, transactionId)
+        // Only process if we have VNPay-specific parameters with secure hash
+        Map<String, String> vnpayParams = new HashMap<>();
+        boolean hasVnpayParams = false;
+        for (Map.Entry<String, String> entry : params.entrySet()) {
+            String key = entry.getKey();
+            if (key.startsWith("vnp_")) {
+                vnpayParams.put(key, entry.getValue());
+                hasVnpayParams = true;
+            }
+        }
+        
+        // Only process VNPay IPN if we have VNPay parameters with secure hash
+        if (hasVnpayParams && vnpayParams.containsKey("vnp_SecureHash")) {
+            try {
+                IpnResponse ipnResponse = ipnHandler.process(vnpayParams);
+                
+                // if response from vnpay returnUrl is success
+                if (ipnResponse.getResponseCode().equals(VNPayIPNResponseConst.SUCCESS.getResponseCode())) {
+                    if (transaction.getType().equals(ETransactionType.TOP_UP)) {
+                        // update transaction status to SUCCESSFUL
+                        transactionResponse.setStatus(ETransactionStatus.SUCCESSFUL);
+                        transaction.setStatus(ETransactionStatus.SUCCESSFUL);
+                        log.info("Updating transaction to SUCCESSFUL: transactionId={}", transaction.getId());
+                        // set balance for wallet
+                        wallet.setBalance(wallet.getBalance() + transaction.getAmount());
+                        //send email if top-up successfully
+                        emailService.sendWalletUpdateEmail(currentUser.getEmail(), walletUrl);
+                        redisUtil.removeCacheProcessingTransaction(transaction.getId());
+                        //save balance
+                        walletRepository.save(wallet);
+                    }
+                    //save transaction status
+                    transactionRepository.save(transaction);
+                }
+                // if vnpay response is failed
+                else {
+                    //update transaction status to FAILED
+                    transactionResponse.setStatus(ETransactionStatus.FAILED);
+                    transaction.setStatus(ETransactionStatus.FAILED);
+                    //save failed transaction
+                    transactionRepository.save(transaction);
+                    log.warn("Transaction failed: transactionId={}, responseCode={}, message={}", 
+                            transactionId, ipnResponse.getResponseCode(), ipnResponse.getMessage());
+                }
+            } catch (AppException e) {
+                // If checksum verification fails or other errors, log and return current status
+                log.error("Error processing VNPay response for transactionId={}: {}", transactionId, e.getMessage());
+                // Don't throw exception - return current transaction status
+                return transactionResponse;
+            }
+        } else {
+            // No VNPay parameters or no secure hash - just return current transaction status
+            log.debug("No VNPay parameters with secure hash in status request for transactionId={}, returning current status", transactionId);
+        }
+        
         return transactionResponse;
     }
 

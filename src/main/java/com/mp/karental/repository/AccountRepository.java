@@ -1,6 +1,9 @@
 package com.mp.karental.repository;
 
 import com.mp.karental.entity.Account;
+import com.mp.karental.entity.Role;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -23,4 +26,6 @@ public interface AccountRepository extends JpaRepository<Account, String> {
     Optional<Account> findByEmail(String email);
 
     Account findByRoleId(int i);
+    
+    Page<Account> findByRole(Role role, Pageable pageable);
 }

@@ -26,10 +26,15 @@ import lombok.experimental.FieldDefaults;
 import lombok.experimental.NonFinal;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -257,7 +262,6 @@ public class UserService {
      */
     public void editPassword(EditPasswordRequest request) {
         // Get information of current password
-        String accountID = SecurityUtil.getCurrentAccountId();
         Account account = SecurityUtil.getCurrentAccount();
 
         // Confirm current password
@@ -275,6 +279,217 @@ public class UserService {
         accountRepository.save(account);
     }
 
+    /**
+     * Retrieves a paginated list of all users for operator management.
+     *
+     * @param page   The requested page number (0-based index).
+     * @param size   The number of records per page.
+     * @param sort   Sorting criteria in the format "field,direction" (e.g., "updatedAt,desc").
+     * @param role   Optional role filter (CUSTOMER, CAR_OWNER, OPERATOR).
+     * @return A page of UserResponse objects containing user information.
+     */
+    public Page<UserResponse> getAllUsersForOperator(int page, int size, String sort, String role) {
+        log.info("Operator {} is requesting all users with role {}", SecurityUtil.getCurrentAccountId(), role);
 
+        // Create a pageable object with sorting
+        Pageable pageable = createPageableForOperator(page, size, sort);
+
+        Page<Account> accounts;
+        
+        // Filter by role if provided
+        if (role != null && !role.isBlank()) {
+            try {
+                ERole roleEnum = ERole.valueOf(role.toUpperCase());
+                Role roleEntity = roleRepository.findByName(roleEnum)
+                        .orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_FOUND_IN_DB));
+                accounts = accountRepository.findByRole(roleEntity, pageable);
+            } catch (IllegalArgumentException e) {
+                log.warn("Invalid role filter: {}", role);
+                accounts = accountRepository.findAll(pageable);
+            }
+        } else {
+            accounts = accountRepository.findAll(pageable);
+        }
+
+        log.info("Successfully retrieved {} users for operator {}", accounts.getTotalElements(), SecurityUtil.getCurrentAccountId());
+
+        // Convert Account entities to UserResponse DTOs
+        return accounts.map(account -> {
+            UserProfile profile = account.getProfile();
+            if (profile != null) {
+                return userMapper.toUserResponse(account, profile);
+            } else {
+                // If profile doesn't exist, create a minimal response
+                return UserResponse.builder()
+                        .id(account.getId())
+                        .email(account.getEmail())
+                        .role(account.getRole() != null ? account.getRole().getName().name() : null)
+                        .build();
+            }
+        });
+    }
+
+    /**
+     * Retrieves a user by ID for operator management.
+     *
+     * @param userId The ID of the user to retrieve.
+     * @return UserResponse containing user details.
+     * @throws AppException if the user is not found.
+     */
+    public UserResponse getUserByIdForOperator(String userId) {
+        log.info("Operator {} is requesting user with id {}", SecurityUtil.getCurrentAccountId(), userId);
+        
+        Account account = accountRepository.findById(userId)
+                .orElseThrow(() -> new AppException(ErrorCode.ACCOUNT_NOT_FOUND_IN_DB));
+        
+        UserProfile profile = account.getProfile();
+        if (profile != null) {
+            return userMapper.toUserResponse(account, profile);
+        } else {
+            return UserResponse.builder()
+                    .id(account.getId())
+                    .email(account.getEmail())
+                    .role(account.getRole() != null ? account.getRole().getName().name() : null)
+                    .build();
+        }
+    }
+
+    /**
+     * Updates a user's profile by operator.
+     *
+     * @param userId  The ID of the user to update.
+     * @param request The updated profile information.
+     * @return The updated profile response.
+     */
+    public EditProfileResponse updateUserByOperator(String userId, EditProfileRequest request) {
+        log.info("Operator {} is updating user with id {}", SecurityUtil.getCurrentAccountId(), userId);
+
+        Account account = accountRepository.findById(userId)
+                .orElseThrow(() -> new AppException(ErrorCode.ACCOUNT_NOT_FOUND_IN_DB));
+
+        UserProfile userProfile = userProfileRepository.findById(userId)
+                .orElseThrow(() -> new AppException(ErrorCode.ACCOUNT_NOT_FOUND_IN_DB));
+
+        // Check phoneNumber: If diff old value then check duplicate. Else update
+        if (!request.getPhoneNumber().equals(userProfile.getPhoneNumber())) {
+            if (userProfileRepository.existsByPhoneNumber(request.getPhoneNumber())) {
+                throw new AppException(ErrorCode.NOT_UNIQUE_PHONE_NUMBER);
+            }
+            userProfile.setPhoneNumber(request.getPhoneNumber());
+        }
+
+        // Check nationalId: If diff old value then check duplicate. Else update
+        if (!request.getNationalId().equals(userProfile.getNationalId())) {
+            if (userProfileRepository.existsByNationalId(request.getNationalId())) {
+                throw new AppException(ErrorCode.NOT_UNIQUE_NATIONAL_ID);
+            }
+            userProfile.setNationalId(request.getNationalId());
+        }
+
+        // Update email if different
+        if (!request.getEmail().equals(account.getEmail())) {
+            if (accountRepository.findByEmail(request.getEmail()).isPresent()) {
+                throw new AppException(ErrorCode.NOT_UNIQUE_EMAIL);
+            }
+            account.setEmail(request.getEmail());
+            accountRepository.save(account);
+        }
+
+        // Handle driving license upload
+        if (request.getDrivingLicense() != null) {
+            String newUri = "user/" + userId + "/driving-license" + fileService.getFileExtension(request.getDrivingLicense());
+            fileService.uploadFile(request.getDrivingLicense(), newUri);
+            userProfile.setDrivingLicenseUri(newUri);
+        }
+
+        // Update user profile from request
+        userMapper.updateUserProfileFromRequest(request, userProfile);
+        userProfileRepository.save(userProfile);
+
+        EditProfileResponse response = userMapper.toEditProfileResponse(userProfile);
+        response.setEmail(account.getEmail());
+
+        if (userProfile.getDrivingLicenseUri() != null) {
+            response.setDrivingLicenseUrl(fileService.getFileUrl(userProfile.getDrivingLicenseUri()));
+        }
+
+        return response;
+    }
+
+    /**
+     * Deactivates a user account by operator.
+     *
+     * @param userId The ID of the user to deactivate.
+     */
+    public void deactivateUser(String userId) {
+        log.info("Operator {} is deactivating user with id {}", SecurityUtil.getCurrentAccountId(), userId);
+        
+        Account account = accountRepository.findById(userId)
+                .orElseThrow(() -> new AppException(ErrorCode.ACCOUNT_NOT_FOUND_IN_DB));
+        
+        account.setActive(false);
+        accountRepository.save(account);
+        log.info("User {} deactivated successfully", userId);
+    }
+
+    /**
+     * Activates a user account by operator.
+     *
+     * @param userId The ID of the user to activate.
+     */
+    public void activateUser(String userId) {
+        log.info("Operator {} is activating user with id {}", SecurityUtil.getCurrentAccountId(), userId);
+        
+        Account account = accountRepository.findById(userId)
+                .orElseThrow(() -> new AppException(ErrorCode.ACCOUNT_NOT_FOUND_IN_DB));
+        
+        account.setActive(true);
+        accountRepository.save(account);
+        log.info("User {} activated successfully", userId);
+    }
+
+    /**
+     * Creates a pageable object with sorting for operator user management.
+     * Ensures proper pagination and applies custom sorting criteria.
+     *
+     * @param page The requested page number (0-based index).
+     * @param size The number of records per page.
+     * @param sort Sorting criteria in the format "field,direction" (e.g., "updatedAt,desc").
+     * @return Pageable object with sorting applied.
+     */
+    private Pageable createPageableForOperator(int page, int size, String sort) {
+        // Ensure the page size is within a valid range (default 10, max 100)
+        size = (size > 0 && size <= 100) ? size : 10;
+
+        // Ensure the page index is non-negative
+        page = Math.max(page, 0);
+
+        // List of allowed fields for sorting
+        List<String> allowedSortFields = List.of("updatedAt", "createdAt", "email");
+
+        Sort sortCriteria = null;
+
+        // Check if sorting parameters are provided
+        if (sort != null && !sort.isBlank()) {
+            String[] sortParams = sort.split(",");
+            if (sortParams.length == 2) {
+                String requestedField = sortParams[0].trim();
+                String requestedDirection = sortParams[1].trim().toUpperCase();
+                Sort.Direction direction = "ASC".equals(requestedDirection) ? Sort.Direction.ASC : Sort.Direction.DESC;
+
+                // Apply sorting only if the requested field is allowed
+                if (allowedSortFields.contains(requestedField)) {
+                    sortCriteria = Sort.by(direction, requestedField);
+                }
+            }
+        }
+
+        // If no valid sorting parameter is provided, default to sorting by updatedAt (descending)
+        if (sortCriteria == null) {
+            sortCriteria = Sort.by(Sort.Direction.DESC, "updatedAt");
+        }
+
+        return PageRequest.of(page, size, sortCriteria);
+    }
 
 }

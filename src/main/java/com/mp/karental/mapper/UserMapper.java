@@ -49,6 +49,7 @@ public interface UserMapper {
      * @param userProfile the user profile entity containing personal details
      * @return a {@code UserResponse} DTO combining information from both the account and profile
      */
+    @Mapping(target = "id", source = "account.id")
     @Mapping(target = "fullName", source = "userProfile.fullName")
     @Mapping(target = "email", source = "account.email")
     @Mapping(target = "phoneNumber", source = "userProfile.phoneNumber")

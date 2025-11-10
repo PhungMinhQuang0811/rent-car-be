@@ -20,6 +20,7 @@ import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -326,6 +327,172 @@ public class UserController {
         userService.editPassword(request);
         return ApiResponse.<String>builder()
                 .message("Password updated successfully")
+                .build();
+    }
+
+    /**
+     * API to get all users with pagination for operator.
+     *
+     * @param page   The page number (0-based index).
+     * @param size   The number of records per page.
+     * @param sort   Sorting criteria in the format "field,direction".
+     * @param role   Optional role filter (CUSTOMER, CAR_OWNER, OPERATOR).
+     * @return An ApiResponse containing paginated user list.
+     */
+    @Operation(
+            summary = "Get all users with pagination",
+            description = "Operator can retrieve all users with pagination, sorting, and role filtering",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "Success",
+                            content = @Content(schema = @Schema(implementation = ApiResponse.class))
+                    )
+            }
+    )
+    @GetMapping("/operator/list")
+    @PreAuthorize("hasRole('OPERATOR')")
+    public ApiResponse<Page<UserResponse>> getAllUsers(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) String role) {
+        log.info("Operator requesting all users - page: {}, size: {}, sort: {}, role: {}", page, size, sort, role);
+        Page<UserResponse> users = userService.getAllUsersForOperator(page, size, sort, role);
+        return ApiResponse.<Page<UserResponse>>builder()
+                .data(users)
+                .build();
+    }
+
+    /**
+     * API to get a user by ID for operator.
+     *
+     * @param userId The ID of the user to retrieve.
+     * @return An ApiResponse containing user details.
+     */
+    @Operation(
+            summary = "Get user by ID",
+            description = "Operator can retrieve a specific user's details by ID",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "Success",
+                            content = @Content(schema = @Schema(implementation = ApiResponse.class))
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "User not found",
+                            content = @Content(schema = @Schema(implementation = ApiResponse.class))
+                    )
+            }
+    )
+    @GetMapping("/operator/{userId}")
+    @PreAuthorize("hasRole('OPERATOR')")
+    public ApiResponse<UserResponse> getUserById(@PathVariable String userId) {
+        log.info("Operator requesting user with id: {}", userId);
+        UserResponse user = userService.getUserByIdForOperator(userId);
+        return ApiResponse.<UserResponse>builder()
+                .data(user)
+                .build();
+    }
+
+    /**
+     * API to update a user by operator.
+     *
+     * @param userId  The ID of the user to update.
+     * @param request The updated user information.
+     * @return An ApiResponse containing updated user information.
+     */
+    @Operation(
+            summary = "Update user by operator",
+            description = "Operator can update a user's profile information",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "Success",
+                            content = @Content(schema = @Schema(implementation = ApiResponse.class))
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "Bad request - validation errors",
+                            content = @Content(schema = @Schema(implementation = ApiResponse.class))
+                    )
+            }
+    )
+    @PutMapping(value = "/operator/{userId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasRole('OPERATOR')")
+    public ApiResponse<EditProfileResponse> updateUser(
+            @PathVariable String userId,
+            @ModelAttribute @Valid EditProfileRequest request) {
+        log.info("Operator updating user with id: {}", userId);
+        EditProfileResponse response = userService.updateUserByOperator(userId, request);
+        return ApiResponse.<EditProfileResponse>builder()
+                .data(response)
+                .message("User updated successfully")
+                .build();
+    }
+
+    /**
+     * API to deactivate a user by operator.
+     *
+     * @param userId The ID of the user to deactivate.
+     * @return An ApiResponse indicating success.
+     */
+    @Operation(
+            summary = "Deactivate user",
+            description = "Operator can deactivate a user account",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "Success",
+                            content = @Content(schema = @Schema(implementation = ApiResponse.class))
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "User not found",
+                            content = @Content(schema = @Schema(implementation = ApiResponse.class))
+                    )
+            }
+    )
+    @PutMapping("/operator/{userId}/deactivate")
+    @PreAuthorize("hasRole('OPERATOR')")
+    public ApiResponse<String> deactivateUser(@PathVariable String userId) {
+        log.info("Operator deactivating user with id: {}", userId);
+        userService.deactivateUser(userId);
+        return ApiResponse.<String>builder()
+                .message("User deactivated successfully")
+                .build();
+    }
+
+    /**
+     * API to activate a user by operator.
+     *
+     * @param userId The ID of the user to activate.
+     * @return An ApiResponse indicating success.
+     */
+    @Operation(
+            summary = "Activate user",
+            description = "Operator can activate a user account",
+            responses = {
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "200",
+                            description = "Success",
+                            content = @Content(schema = @Schema(implementation = ApiResponse.class))
+                    ),
+                    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                            responseCode = "400",
+                            description = "User not found",
+                            content = @Content(schema = @Schema(implementation = ApiResponse.class))
+                    )
+            }
+    )
+    @PutMapping("/operator/{userId}/activate")
+    @PreAuthorize("hasRole('OPERATOR')")
+    public ApiResponse<String> activateUser(@PathVariable String userId) {
+        log.info("Operator activating user with id: {}", userId);
+        userService.activateUser(userId);
+        return ApiResponse.<String>builder()
+                .message("User activated successfully")
                 .build();
     }
 
