@@ -27,7 +27,7 @@ services:
 
   redis:
     image: redis:7.4.2
-    container_name: redis
+    container_name: redis-karental
     restart: unless-stopped
     ports:
       - "6379:6379"

@@ -86,6 +86,7 @@ public class BookingService {
         if (!carService.isCarAvailable(car.getId(), createBookingRequest.getPickUpTime(), createBookingRequest.getDropOffTime())) {
             throw new AppException(ErrorCode.CAR_NOT_AVAILABLE);
         }
+        createBookingRequest.setPickUpLocation(car.getCityProvince() + ", " + car.getDistrict() + ", " + car.getWard() + ", " + car.getHouseNumberStreet());
 
         // Map the booking request to a Booking entity.
         Booking booking = bookingMapper.toBooking(createBookingRequest);
