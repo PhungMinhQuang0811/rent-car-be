@@ -74,7 +74,9 @@ public class JwtUtils {
     }
 
     public String generateCsrfTokenFromUserEmail(String email){
-        return generateJwtToken(email, csrfTokenSecretKey, accessTokenExpiration);
+        // The CSRF token must remain valid while the refresh token can be used,
+        // including after the shorter-lived access token expires.
+        return generateJwtToken(email, csrfTokenSecretKey, refreshTokenExpiration);
     }
 
     private String generateJwtToken(String email, String secretKey, long expiration){

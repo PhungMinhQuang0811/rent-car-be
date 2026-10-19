@@ -35,10 +35,14 @@ public class FileDocumentValidator implements ConstraintValidator<ValidDocument,
         }
 
         // Extract the file extension
-        String fileExtension = fileName.substring(fileName.lastIndexOf(".") + 1).toLowerCase();
+        int dot = fileName.lastIndexOf('.');
+        if (dot < 0 || dot == fileName.length() - 1) {
+            return false;
+        }
+        String fileExtension = fileName.substring(dot + 1).toLowerCase();
 
         // Validate the file extension using the isValidExtension method
-        return isValidExtension(fileExtension);
+        return isValidExtension(fileExtension) && UploadedFileSignature.isAllowedDocument(file, fileExtension);
     }
 
     /**

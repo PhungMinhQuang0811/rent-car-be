@@ -161,7 +161,7 @@ public class AuthenticationController {
                     )
             }
     )
-    @GetMapping("/refresh-token")
+    @PostMapping("/refresh-token")
     public ResponseEntity<ApiResponse<String>> refreshToken(HttpServletRequest request) {
         return authenticationService.refreshToken(request);
     }
@@ -192,7 +192,7 @@ public class AuthenticationController {
                     )
             }
     )
-    @GetMapping("/logout")
+    @PostMapping("/logout")
     public ResponseEntity<ApiResponse<String>> logout(HttpServletRequest request) {
         return authenticationService.logout(request);
     }

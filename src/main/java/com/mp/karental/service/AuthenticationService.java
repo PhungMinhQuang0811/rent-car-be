@@ -172,8 +172,6 @@ public class AuthenticationService {
             throw new AppException(ErrorCode.INVALID_REFRESH_TOKEN);
         }
 
-        getTokensAndInvalidateTokens(request);
-
         //get user account's id from refresh token to generate new access token
         String accountId = jwtUtils.getUserAccountIdFromRefreshToken(refreshToken);
         Account account = accountRepository.findById(accountId)
@@ -182,6 +180,9 @@ public class AuthenticationService {
         if (!account.isActive()) {
             throw new AppException(ErrorCode.ACCOUNT_IS_INACTIVE);
         }
+        validateCsrfToken(request, account.getEmail());
+        getTokensAndInvalidateTokens(request);
+
         String csrfToken = jwtUtils.generateCsrfTokenFromUserEmail(account.getEmail());
 
         ApiResponse<String> apiResponse = ApiResponse.<String>builder()
@@ -194,6 +195,10 @@ public class AuthenticationService {
     public ResponseEntity<ApiResponse<String>> logout(HttpServletRequest request) {
         log.info("Processing logout request");
 
+        String email = getAuthenticatedEmailForLogout(request);
+        if (email != null) {
+            validateCsrfToken(request, email);
+        }
         getTokensAndInvalidateTokens(request);
 
         ApiResponse<String> apiResponse = ApiResponse.<String>builder()
@@ -201,6 +206,48 @@ public class AuthenticationService {
                 .build();
         log.info("Logged out successfully");
         return sendLogoutApiResponseResponseEntity(apiResponse);
+    }
+
+    private String getAuthenticatedEmailForLogout(HttpServletRequest request) {
+        String accessToken = getCookieValueByName(request, accessTokenCookieName);
+        if (accessToken != null && !accessToken.isBlank()) {
+            try {
+                jwtUtils.validateJwtAccessToken(accessToken);
+                if (!tokenService.isAccessTokenInvalidated(accessToken)) {
+                    return jwtUtils.getUserEmailFromAccessToken(accessToken);
+                }
+            } catch (AppException e) {
+                log.debug("Access token unavailable during logout; checking refresh token");
+            }
+        }
+
+        String refreshToken = getCookieValueByName(request, refreshTokenCookieName);
+        if (refreshToken != null && !refreshToken.isBlank()) {
+            try {
+                jwtUtils.validateJwtRefreshToken(refreshToken);
+                if (!tokenService.isRefreshTokenInvalidated(refreshToken)) {
+                    String accountId = jwtUtils.getUserAccountIdFromRefreshToken(refreshToken);
+                    return accountRepository.findById(accountId)
+                            .map(Account::getEmail)
+                            .orElse(null);
+                }
+            } catch (AppException e) {
+                log.debug("Refresh token unavailable during logout");
+            }
+        }
+        return null;
+    }
+
+    private void validateCsrfToken(HttpServletRequest request, String expectedEmail) {
+        String csrfToken = request.getHeader(csrfTokenHeaderName);
+        if (csrfToken == null || csrfToken.isBlank()) {
+            throw new AppException(ErrorCode.INVALID_CSRF_TOKEN);
+        }
+        jwtUtils.validateJwtCsrfToken(csrfToken);
+        if (tokenService.isCsrfTokenInvalidated(csrfToken)
+                || !expectedEmail.equalsIgnoreCase(jwtUtils.getUserEmailFromCsrfToken(csrfToken))) {
+            throw new AppException(ErrorCode.INVALID_CSRF_TOKEN);
+        }
     }
 
     private <T> ResponseEntity<ApiResponse<T>> sendLogoutApiResponseResponseEntity(ApiResponse<T> apiResponse) {
@@ -267,15 +314,15 @@ public class AuthenticationService {
     private ResponseCookie generateCookie(String cookieName, String cookieValue, String path, long maxAgeMiliseconds, boolean isHttpOnly) {
         return ResponseCookie
                 .from(cookieName, cookieValue)
-//                .path(path)
-                .path("/")
-//                .domain(domain)
+                .path(path)
+//                .path("/")
+                .domain(domain)
                 .maxAge(maxAgeMiliseconds / 1000) // seconds ~ 1days
                 .httpOnly(isHttpOnly)
-//                .secure(true)
-                .secure(false)
-//                .sameSite("None")
-                .sameSite("Lax")
+                .secure(true)
+//                .secure(false)
+                .sameSite("None")
+//                .sameSite("Lax")
                 .build();
     }
 
