@@ -288,9 +288,8 @@ public class UserController {
      * @param request the new profile information
      * @return an ApiResponse containing updated user information
      */
-    @PutMapping(value = "/edit-profile", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ApiResponse<EditProfileResponse> editProfile(@ModelAttribute @Valid EditProfileRequest request) {
-        log.info("Editing profile for user: {}", request);
+    @PutMapping(value = "/edit-profile", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ApiResponse<EditProfileResponse> editProfile(@RequestBody @Valid EditProfileRequest request) {
         return ApiResponse.<EditProfileResponse>builder()
                 .data(userService.editProfile(request))
                 .build();
@@ -419,12 +418,11 @@ public class UserController {
                     )
             }
     )
-    @PutMapping(value = "/operator/{userId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PutMapping(value = "/operator/{userId}", consumes = MediaType.APPLICATION_JSON_VALUE)
     @PreAuthorize("hasRole('OPERATOR')")
     public ApiResponse<EditProfileResponse> updateUser(
             @PathVariable String userId,
-            @ModelAttribute @Valid EditProfileRequest request) {
-        log.info("Operator updating user with id: {}", userId);
+            @RequestBody @Valid EditProfileRequest request) {
         EditProfileResponse response = userService.updateUserByOperator(userId, request);
         return ApiResponse.<EditProfileResponse>builder()
                 .data(response)

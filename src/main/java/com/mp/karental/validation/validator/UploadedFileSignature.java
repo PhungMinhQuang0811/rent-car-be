@@ -6,10 +6,10 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
-final class UploadedFileSignature {
+public final class UploadedFileSignature {
     private UploadedFileSignature() {}
 
-    static boolean isAllowedImage(MultipartFile file, String extension) {
+    public static boolean isAllowedImage(MultipartFile file, String extension) {
         try {
             byte[] bytes = file.getBytes();
             return switch (extension.toLowerCase(Locale.ROOT)) {
@@ -23,7 +23,7 @@ final class UploadedFileSignature {
         }
     }
 
-    static boolean isAllowedDocument(MultipartFile file, String extension) {
+    public static boolean isAllowedDocument(MultipartFile file, String extension) {
         try {
             byte[] bytes = file.getBytes();
             return switch (extension.toLowerCase(Locale.ROOT)) {

@@ -7,7 +7,6 @@ import jakarta.validation.constraints.Email;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 import org.hibernate.annotations.CreationTimestamp;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -75,9 +74,8 @@ public class CreateBookingRequest {
     @Schema(example = "john.doe@example.com", description = "The email address of the driver")
     String driverEmail;
 
-    @ValidDocument(message = "INVALID_DOCUMENT_FILE")
-    @Schema(type = "string", format = "binary", description = "Driver driving license file (.doc, .docx, .pdf, .jpeg, .jpg, .png)")
-    MultipartFile driverDrivingLicense;
+    @Schema(description = "Required uploaded asset ID when a separate driver must provide a license")
+    String driverDrivingLicenseAssetId;
 
     @Schema(example = "Tỉnh Hà Giang", description = "The city or province of the driver")
     String driverCityProvince;

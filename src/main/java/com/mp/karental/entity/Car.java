@@ -97,26 +97,61 @@ public class Car {
     //documents
     @Column(name = "registration_paper_uri")
     String registrationPaperUri;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "registration_paper_asset_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    UploadAsset registrationPaperAsset;
     @Column(nullable = false)
     boolean registrationPaperUriIsVerified = true;
     @Column(name = "certificate_of_inspection_uri")
     String certificateOfInspectionUri;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "certificate_of_inspection_asset_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    UploadAsset certificateOfInspectionAsset;
     @Column(nullable = false)
     boolean certificateOfInspectionUriIsVerified = true;
     @Column(name = "insurance_uri")
     String insuranceUri;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "insurance_asset_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    UploadAsset insuranceAsset;
     @Column(nullable = false)
     boolean insuranceUriIsVerified = true;
 
     //car image
     @Column(name = "car_image_front")
     String carImageFront;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "car_image_front_asset_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    UploadAsset carImageFrontAsset;
     @Column(name = "car_image_back")
     String carImageBack;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "car_image_back_asset_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    UploadAsset carImageBackAsset;
     @Column(name = "car_image_left")
     String carImageLeft;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "car_image_left_asset_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    UploadAsset carImageLeftAsset;
     @Column(name = "car_image_right")
     String carImageRight;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "car_image_right_asset_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    UploadAsset carImageRightAsset;
 
     @ManyToOne
     @JoinColumn(name = "account_id")

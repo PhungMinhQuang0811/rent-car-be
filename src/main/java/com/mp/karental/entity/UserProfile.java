@@ -56,6 +56,12 @@ public class UserProfile {
     @Column(unique = true)
     String drivingLicenseUri;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "driving_license_asset_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    UploadAsset drivingLicenseAsset;
+
     @PostPersist
     public void onPostPersist() {
         String accountId;

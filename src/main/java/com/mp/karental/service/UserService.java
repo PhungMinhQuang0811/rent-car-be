@@ -1,6 +1,7 @@
 package com.mp.karental.service;
 
 import com.mp.karental.constant.ERole;
+import com.mp.karental.constant.EUploadPurpose;
 import com.mp.karental.dto.request.user.AccountRegisterRequest;
 import com.mp.karental.dto.request.user.EditPasswordRequest;
 import com.mp.karental.dto.request.user.EditProfileRequest;
@@ -45,7 +46,6 @@ import java.util.Optional;
  * @version 1.0
  */
 @Service
-@Transactional
 @RequiredArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 @Slf4j
@@ -64,6 +64,7 @@ public class UserService {
 
     PasswordEncoder passwordEncoder;
     FileService fileService;
+    UploadAssetService uploadAssetService;
     EmailService emailService;
     RedisUtil redisUtil;
 
@@ -75,12 +76,16 @@ public class UserService {
      *
      * @author DieuTTH4
      */
+    @Transactional
     public UserResponse addNewAccount(AccountRegisterRequest request){
         log.info("Create new account");
         Account account = userMapper.toAccount(request);
         //set role for the account
-        Optional<Role> role = roleRepository
-                .findByName(request.getIsCustomer().equals("true") ? ERole.CUSTOMER : ERole.CAR_OWNER);
+        ERole requestedRole = ERole.CAR_OWNER;
+        if (request.getIsCustomer().equals("true")) {
+            requestedRole = ERole.CUSTOMER;
+        }
+        Optional<Role> role = roleRepository.findByName(requestedRole);
         if (role.isPresent()){
             account.setRole(role.get());
         } else {
@@ -133,6 +138,7 @@ public class UserService {
         emailService.sendRegisterEmail(account.getEmail(), confirmUrl);
     }
 
+    @Transactional
     public void verifyEmail(String verifyEmailToken){
         log.info("Verify email");
         String accountId = redisUtil.getValueOfVerifyEmailToken(verifyEmailToken);
@@ -165,6 +171,7 @@ public class UserService {
      * @param request the updated profile information
      * @return the updated profile response
      */
+    @Transactional
     public EditProfileResponse editProfile(EditProfileRequest request) {
         log.info("Editing profile for user with phone number: {}", request.getPhoneNumber());
 
@@ -189,11 +196,13 @@ public class UserService {
             }
             userProfile.setNationalId(request.getNationalId());
         }
-        //user upload file
-        if (request.getDrivingLicense() != null) {
-            String newUri = "user/" + accountID + "/driving-license" + fileService.getFileExtension(request.getDrivingLicense());
-            fileService.uploadFile(request.getDrivingLicense(), newUri);
-            userProfile.setDrivingLicenseUri(newUri);
+        if (request.getDrivingLicenseAssetId() != null && !request.getDrivingLicenseAssetId().isBlank()) {
+            var oldLicenseAsset = userProfile.getDrivingLicenseAsset();
+            var licenseAsset = uploadAssetService.attach(request.getDrivingLicenseAssetId(),
+                    EUploadPurpose.PROFILE_DRIVER_LICENSE, "PROFILE", accountID, accountID, false);
+            userProfile.setDrivingLicenseAsset(licenseAsset);
+            userProfile.setDrivingLicenseUri(licenseAsset.getPublicId());
+            uploadAssetService.markForDeletion(oldLicenseAsset);
         }
 
         // Update user profile from request
@@ -213,7 +222,8 @@ public class UserService {
 
         // Account entity is saved only if modifications are applied
         if (userProfile.getDrivingLicenseUri() != null) {
-            editProfileResponse.setDrivingLicenseUrl(fileService.getFileUrl(userProfile.getDrivingLicenseUri()));
+            editProfileResponse.setDrivingLicenseUrl(fileService.getFileUrl(
+                    userProfile.getDrivingLicenseAsset(), userProfile.getDrivingLicenseUri()));
         }
 
         return editProfileResponse;
@@ -226,6 +236,7 @@ public class UserService {
      * @return {@code EditProfileResponse} containing user profile details.
      * @throws AppException if the user profile is not found in the database.
      */
+    @Transactional(readOnly = true)
     public EditProfileResponse getUserProfile() {
         log.info("Fetching user profile");
 
@@ -248,7 +259,8 @@ public class UserService {
 
         // If the user has a driving license URI, generate and set the file URL
         if (userProfile.getDrivingLicenseUri() != null) {
-            response.setDrivingLicenseUrl(fileService.getFileUrl(userProfile.getDrivingLicenseUri()));
+            response.setDrivingLicenseUrl(fileService.getFileUrl(
+                    userProfile.getDrivingLicenseAsset(), userProfile.getDrivingLicenseUri()));
         }
 
         return response;
@@ -260,6 +272,7 @@ public class UserService {
      * @param request the request containing the current password, new password, and confirmation password
      * @throws AppException if the account is not found, the current password is incorrect, or the new password is invalid
      */
+    @Transactional
     public void editPassword(EditPasswordRequest request) {
         // Get information of current password
         Account account = SecurityUtil.getCurrentAccount();
@@ -288,6 +301,7 @@ public class UserService {
      * @param role   Optional role filter (CUSTOMER, CAR_OWNER, OPERATOR).
      * @return A page of UserResponse objects containing user information.
      */
+    @Transactional(readOnly = true)
     public Page<UserResponse> getAllUsersForOperator(int page, int size, String sort, String role) {
         log.info("Operator {} is requesting all users with role {}", SecurityUtil.getCurrentAccountId(), role);
 
@@ -320,10 +334,14 @@ public class UserService {
                 return userMapper.toUserResponse(account, profile);
             } else {
                 // If profile doesn't exist, create a minimal response
+                String roleName = null;
+                if (account.getRole() != null) {
+                    roleName = account.getRole().getName().name();
+                }
                 return UserResponse.builder()
                         .id(account.getId())
                         .email(account.getEmail())
-                        .role(account.getRole() != null ? account.getRole().getName().name() : null)
+                        .role(roleName)
                         .build();
             }
         });
@@ -336,6 +354,7 @@ public class UserService {
      * @return UserResponse containing user details.
      * @throws AppException if the user is not found.
      */
+    @Transactional(readOnly = true)
     public UserResponse getUserByIdForOperator(String userId) {
         log.info("Operator {} is requesting user with id {}", SecurityUtil.getCurrentAccountId(), userId);
         
@@ -346,10 +365,14 @@ public class UserService {
         if (profile != null) {
             return userMapper.toUserResponse(account, profile);
         } else {
+            String roleName = null;
+            if (account.getRole() != null) {
+                roleName = account.getRole().getName().name();
+            }
             return UserResponse.builder()
                     .id(account.getId())
                     .email(account.getEmail())
-                    .role(account.getRole() != null ? account.getRole().getName().name() : null)
+                    .role(roleName)
                     .build();
         }
     }
@@ -361,6 +384,7 @@ public class UserService {
      * @param request The updated profile information.
      * @return The updated profile response.
      */
+    @Transactional
     public EditProfileResponse updateUserByOperator(String userId, EditProfileRequest request) {
         log.info("Operator {} is updating user with id {}", SecurityUtil.getCurrentAccountId(), userId);
 
@@ -395,11 +419,14 @@ public class UserService {
             accountRepository.save(account);
         }
 
-        // Handle driving license upload
-        if (request.getDrivingLicense() != null) {
-            String newUri = "user/" + userId + "/driving-license" + fileService.getFileExtension(request.getDrivingLicense());
-            fileService.uploadFile(request.getDrivingLicense(), newUri);
-            userProfile.setDrivingLicenseUri(newUri);
+        if (request.getDrivingLicenseAssetId() != null && !request.getDrivingLicenseAssetId().isBlank()) {
+            var oldLicenseAsset = userProfile.getDrivingLicenseAsset();
+            var licenseAsset = uploadAssetService.attach(request.getDrivingLicenseAssetId(),
+                    EUploadPurpose.PROFILE_DRIVER_LICENSE, "PROFILE", userId,
+                    SecurityUtil.getCurrentAccountId(), true);
+            userProfile.setDrivingLicenseAsset(licenseAsset);
+            userProfile.setDrivingLicenseUri(licenseAsset.getPublicId());
+            uploadAssetService.markForDeletion(oldLicenseAsset);
         }
 
         // Update user profile from request
@@ -410,7 +437,8 @@ public class UserService {
         response.setEmail(account.getEmail());
 
         if (userProfile.getDrivingLicenseUri() != null) {
-            response.setDrivingLicenseUrl(fileService.getFileUrl(userProfile.getDrivingLicenseUri()));
+            response.setDrivingLicenseUrl(fileService.getFileUrl(
+                    userProfile.getDrivingLicenseAsset(), userProfile.getDrivingLicenseUri()));
         }
 
         return response;
@@ -421,6 +449,7 @@ public class UserService {
      *
      * @param userId The ID of the user to deactivate.
      */
+    @Transactional
     public void deactivateUser(String userId) {
         log.info("Operator {} is deactivating user with id {}", SecurityUtil.getCurrentAccountId(), userId);
         
@@ -437,6 +466,7 @@ public class UserService {
      *
      * @param userId The ID of the user to activate.
      */
+    @Transactional
     public void activateUser(String userId) {
         log.info("Operator {} is activating user with id {}", SecurityUtil.getCurrentAccountId(), userId);
         
@@ -459,7 +489,9 @@ public class UserService {
      */
     private Pageable createPageableForOperator(int page, int size, String sort) {
         // Ensure the page size is within a valid range (default 10, max 100)
-        size = (size > 0 && size <= 100) ? size : 10;
+        if (size <= 0 || size > 100) {
+            size = 10;
+        }
 
         // Ensure the page index is non-negative
         page = Math.max(page, 0);
@@ -475,7 +507,10 @@ public class UserService {
             if (sortParams.length == 2) {
                 String requestedField = sortParams[0].trim();
                 String requestedDirection = sortParams[1].trim().toUpperCase();
-                Sort.Direction direction = "ASC".equals(requestedDirection) ? Sort.Direction.ASC : Sort.Direction.DESC;
+                Sort.Direction direction = Sort.Direction.DESC;
+                if ("ASC".equals(requestedDirection)) {
+                    direction = Sort.Direction.ASC;
+                }
 
                 // Apply sorting only if the requested field is allowed
                 if (allowedSortFields.contains(requestedField)) {

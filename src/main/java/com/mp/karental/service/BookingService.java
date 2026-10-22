@@ -4,6 +4,7 @@ import com.mp.karental.constant.EBookingStatus;
 import com.mp.karental.constant.EPaymentType;
 import com.mp.karental.dto.request.booking.CreateBookingRequest;
 import com.mp.karental.constant.ERole;
+import com.mp.karental.constant.EUploadPurpose;
 import com.mp.karental.dto.request.booking.EditBookingRequest;
 import com.mp.karental.dto.response.booking.BookingResponse;
 import com.mp.karental.dto.response.booking.BookingThumbnailResponse;
@@ -28,7 +29,6 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Duration;
 import java.time.LocalDate;
@@ -46,7 +46,6 @@ import java.util.stream.Stream;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-@Transactional
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 public class BookingService {
     BookingRepository bookingRepository;
@@ -55,6 +54,7 @@ public class BookingService {
     RedisUtil redisUtil;
     WalletRepository walletRepository;
     FileService fileService;
+    UploadAssetService uploadAssetService;
     CarService carService;
     TransactionService transactionService;
     EmailService emailService;
@@ -70,6 +70,7 @@ public class BookingService {
      * @return BookingResponse containing booking details.
      * @throws AppException if there are validation issues or car availability problems.
      */
+    @Transactional
     public BookingResponse createBooking(CreateBookingRequest createBookingRequest) throws AppException {
         // Get the current logged-in user's account ID and account details
         Account customerAccount = prepareBooking();
@@ -119,11 +120,15 @@ public class BookingService {
                     createBookingRequest.getDriverHouseNumberStreet()
             );
 
-            MultipartFile drivingLicense = createBookingRequest.getDriverDrivingLicense();
-            drivingLicenseKey = uploadDriverDrivingLicense(drivingLicense, booking);
+            var licenseAsset = uploadAssetService.attach(
+                    createBookingRequest.getDriverDrivingLicenseAssetId(), EUploadPurpose.BOOKING_DRIVER_LICENSE,
+                    "BOOKING", booking.getBookingNumber(), customerAccountId, false);
+            booking.setDriverDrivingLicenseAsset(licenseAsset);
+            drivingLicenseKey = licenseAsset.getPublicId();
         } else {
             // Use existing license URI from account profile if the driver is same as the renter
             drivingLicenseKey = customerAccount.getProfile().getDrivingLicenseUri();
+            booking.setDriverDrivingLicenseAsset(customerAccount.getProfile().getDrivingLicenseAsset());
             setAccountProfileToDriver(booking, customerAccount); // Set the profile information to the booking.
         }
 
@@ -154,30 +159,6 @@ public class BookingService {
         }
 
         return buildBookingResponse(booking, drivingLicenseKey);
-    }
-
-    /**
-     * Uploads the driver's driving license for a booking.
-     * Validates if a driving license file is provided and then uploads it to a designated location.
-     *
-     * @param drivingLicense The uploaded file containing the driver's driving license.
-     * @param booking        The booking associated with the driver's license.
-     * @return The generated file key for the uploaded license.
-     * @throws AppException If the driving license is not provided.
-     */
-    private String uploadDriverDrivingLicense(MultipartFile drivingLicense, Booking booking) {
-        if (drivingLicense == null || drivingLicense.isEmpty()) {
-            // Renter did not provide a driver's driving license
-            throw new AppException(ErrorCode.INVALID_DRIVER_INFO); // Validate driver's license is provided.
-        }
-        // Generate a unique key for storing the driver's license file
-        String drivingLicenseKey = "booking/" + booking.getBookingNumber() + "/driver-driving-license"
-                + fileService.getFileExtension(drivingLicense);
-
-        // Upload the driver's license file
-        fileService.uploadFile(drivingLicense, drivingLicenseKey);
-
-        return drivingLicenseKey;
     }
 
     /**
@@ -242,6 +223,7 @@ public class BookingService {
      * @return BookingResponse containing the updated booking details.
      * @throws AppException If there are any validation issues, the booking is not found, or the user doesn’t have access to edit the booking.
      */
+    @Transactional
     public BookingResponse editBooking(EditBookingRequest editBookingRequest, String bookingNumber) throws AppException {
         Booking booking = validateAndGetBookingCustomer(bookingNumber);
 
@@ -273,11 +255,23 @@ public class BookingService {
                     editBookingRequest.getDriverHouseNumberStreet()
             );
 
-            MultipartFile drivingLicense = editBookingRequest.getDriverDrivingLicense();
-            drivingLicenseKey = uploadDriverDrivingLicense(drivingLicense, booking);
+            drivingLicenseKey = booking.getDriverDrivingLicenseUri();
+            if (editBookingRequest.getDriverDrivingLicenseAssetId() != null
+                    && !editBookingRequest.getDriverDrivingLicenseAssetId().isBlank()) {
+                var oldLicenseAsset = booking.getDriverDrivingLicenseAsset();
+                var licenseAsset = uploadAssetService.attach(
+                        editBookingRequest.getDriverDrivingLicenseAssetId(), EUploadPurpose.BOOKING_DRIVER_LICENSE,
+                        "BOOKING", booking.getBookingNumber(), SecurityUtil.getCurrentAccountId(), false);
+                booking.setDriverDrivingLicenseAsset(licenseAsset);
+                drivingLicenseKey = licenseAsset.getPublicId();
+                uploadAssetService.markForDeletion(oldLicenseAsset);
+            }
         } else {
             // Use existing license URI from account profile if the driver is same as the renter
             drivingLicenseKey = booking.getAccount().getProfile().getDrivingLicenseUri();
+            var oldLicenseAsset = booking.getDriverDrivingLicenseAsset();
+            booking.setDriverDrivingLicenseAsset(booking.getAccount().getProfile().getDrivingLicenseAsset());
+            uploadAssetService.markForDeletion(oldLicenseAsset);
             setAccountProfileToDriver(booking, booking.getAccount()); // Set the profile information to the booking.
         }
 
@@ -327,7 +321,7 @@ public class BookingService {
 
         // Convert the booking entity to a response DTO.
         BookingResponse bookingResponse = bookingMapper.toBookingResponse(booking);
-        bookingResponse.setDriverDrivingLicenseUrl(fileService.getFileUrl(s3Key));
+        bookingResponse.setDriverDrivingLicenseUrl(fileService.getFileUrl(booking.getDriverDrivingLicenseAsset(), s3Key));
         bookingResponse.setCarId(booking.getCar().getId());
         bookingResponse.setTotalPrice(booking.getBasePrice() * days);
         bookingResponse.setDriver(!booking.getDriverDrivingLicenseUri().startsWith("user/"));
@@ -443,6 +437,7 @@ public class BookingService {
      * @param status booking status (nullable to fetch all bookings)
      * @return list of user bookings wrapped in `BookingListResponse`
      */
+    @Transactional(readOnly = true)
     public BookingListResponse getBookingsOfCustomer(int page, int size, String sort, String status) {
         // Retrieve the currently logged-in user's account ID
         String accountId = SecurityUtil.getCurrentAccountId();
@@ -475,6 +470,7 @@ public class BookingService {
      * @param status booking status (nullable to fetch all bookings)
      * @return list of user bookings wrapped in `BookingListResponse`
      */
+    @Transactional(readOnly = true)
     public BookingListResponse getBookingsOfOperator(int page, int size, String sort, String status) {
         // Retrieve the currently logged-in user's account ID
         String accountId = SecurityUtil.getCurrentAccountId();
@@ -500,6 +496,7 @@ public class BookingService {
      * Retrieves the list of bookings for the car owner (based on ownerId). (Car Owner view his/her rentals)
      * If the status is null or invalid, it returns all bookings except those in PENDING_DEPOSIT status.
      */
+    @Transactional(readOnly = true)
     public BookingListResponse getBookingsOfCarOwner(int page, int size, String sort, String status) {
         // Retrieve the car owner's account ID
         String ownerId = SecurityUtil.getCurrentAccountId();
@@ -641,6 +638,7 @@ public class BookingService {
      *
      * @return wallet of that account
      */
+    @Transactional(readOnly = true)
     public WalletResponse getWallet() {
         // Get the current logged-in user's account ID.
         String accountId = SecurityUtil.getCurrentAccountId();
@@ -663,6 +661,7 @@ public class BookingService {
      * @return A BookingResponse object containing the booking details.
      * @throws AppException If the booking is not found or the user does not have permission to access the booking.
      */
+    @Transactional(readOnly = true)
     public BookingResponse getBookingDetailsByBookingNumber(String bookingNumber) {
         // Get the full account details of the currently logged-in user
         Account account = SecurityUtil.getCurrentAccount();
@@ -696,6 +695,7 @@ public class BookingService {
      * @return BookingResponse containing updated booking details.
      * @throws AppException if validation fails.
      */
+    @Transactional
     public BookingResponse confirmBooking(String bookingNumber) {
         log.info("Car owner {} is confirming booking {}", SecurityUtil.getCurrentAccount().getId(), bookingNumber);
         Booking booking = validateAndGetBookingCarOwner(bookingNumber);
@@ -734,6 +734,7 @@ public class BookingService {
      * @throws AppException If the booking is not found, the user is unauthorized to cancel,
      *                      or the booking is in a non-cancellable state.
      */
+    @Transactional
     public BookingResponse cancelBooking(String bookingNumber) {
         Booking booking = validateAndGetBookingCustomer(bookingNumber);
 
@@ -778,6 +779,7 @@ public class BookingService {
      * @return BookingResponse containing updated booking details.
      * @throws AppException If the booking is not found, access is denied, or conditions are not met.
      */
+    @Transactional
     public BookingResponse confirmPickUp(String bookingNumber) {
         Booking booking = validateAndGetBookingCustomer(bookingNumber);
         processOverduePickUpAndDropOffBookings();
@@ -806,6 +808,7 @@ public class BookingService {
      * @throws AppException If the booking is not found, unauthorized access is detected,
      *                      payment processing fails, or email notifications cannot be sent.
      */
+    @Transactional
     public BookingResponse returnCar(String bookingNumber) {
         // Validate and retrieve the booking
         Booking booking = validateAndGetBookingCustomer(bookingNumber);
@@ -837,6 +840,7 @@ public class BookingService {
      * @param bookingNumber the booking number of the booking request return early
      * @return BookingResponse containing updated booking details.
      */
+    @Transactional
     public BookingResponse confirmEarlyReturnCar(String bookingNumber) {
         // Fetch the booking from the database using the booking number
         Booking booking = validateAndGetBookingCarOwner(bookingNumber);
@@ -857,6 +861,7 @@ public class BookingService {
      * @param bookingNumber The booking number of the booking with status WAITING_CONFIRMED.
      * @return BookingResponse containing the updated booking details.
      */
+    @Transactional
     public BookingResponse rejectWaitingConfirmedBooking(String bookingNumber) {
         // Validate and retrieve the booking, ensuring it belongs to the authenticated car owner
         Booking booking = validateAndGetBookingCarOwner(bookingNumber);
@@ -888,6 +893,7 @@ public class BookingService {
      * @param bookingNumber The booking number of the booking with status WAITING_CONFIRMED_RETURN_CAR.
      * @return BookingResponse containing the updated booking details.
      */
+    @Transactional
     public BookingResponse rejectWaitingConfirmedEarlyReturnCarBooking(String bookingNumber) {
         // Validate and retrieve the booking, ensuring it belongs to the authenticated car owner
         Booking booking = validateAndGetBookingCarOwner(bookingNumber);
@@ -913,6 +919,7 @@ public class BookingService {
      * pending->waiting confirm
      * @param bookingNumber The booking number of the booking with status PENDING DEPOSIT and payment type not wallet.
      */
+    @Transactional
     public BookingResponse confirmDeposit(String bookingNumber) {
         Booking booking = validateAndGetBookingOperator(bookingNumber);
         //change the status to waiting confirmed and save the booking,
@@ -927,6 +934,7 @@ public class BookingService {
      * pending->cancelled
      * @param bookingNumber The booking number of the booking with status PENDING DEPOSIT and payment type not wallet.
      */
+    @Transactional
     public BookingResponse rejectDeposit(String bookingNumber) {
         Booking booking = validateAndGetBookingOperator(bookingNumber);
         // Retrieve customer and car owner email addresses
@@ -948,6 +956,7 @@ public class BookingService {
      * pending deposit->waiting confirm
      * @param bookingNumber The booking number of the booking with status PENDING DEPOSIT of this current account(customer)
      */
+    @Transactional
     public BookingResponse payDepositAgain(String bookingNumber) {
         //validate and get booking of customer
         Booking booking = validateAndGetBookingCustomer(bookingNumber);
@@ -969,6 +978,7 @@ public class BookingService {
      * pending payment->completed
      * @param bookingNumber The booking number of the booking with status PENDING PAYMENT of this current account(customer)
      */
+    @Transactional
     public BookingResponse payTotalPaymentAgain(String bookingNumber) {
         //validate and get booking of customer
         Booking booking = validateAndGetBookingCustomer(bookingNumber);
@@ -1148,6 +1158,7 @@ public class BookingService {
     /**
      * process overdue pick up time and drop off time to reminder customer
      */
+    @Transactional
     public void processOverduePickUpAndDropOffBookings() {
         //find all booking status CONFIRMED with pick up time <= now
         List<Booking> overdueBookingPickUps = bookingRepository.findOverduePickups(EBookingStatus.CONFIRMED, LocalDateTime.now());
@@ -1162,6 +1173,7 @@ public class BookingService {
     /**
      * process overdue waiting in status WAITING CONFIRMED AND WAITING CONFIRMED RETURN CAR to auto handle when owner miss
      */
+    @Transactional
     public void processOverdueWaitingBookings() {
         LocalDateTime now = LocalDateTime.now();
         //waiting confirm -> cancelled, refund full

@@ -110,6 +110,9 @@ public enum ErrorCode {
 
     UNSUPPORTED_PAYMENT_TYPE(3044, "This payment type is not supported in this case", HttpStatus.BAD_REQUEST),
     INSUFFICIENT_BALANCE(3045,"Your wallet does not have enough balance", HttpStatus.BAD_REQUEST),
+    UPLOAD_ASSET_NOT_FOUND(3046, "Uploaded asset was not found.", HttpStatus.BAD_REQUEST),
+    UPLOAD_ASSET_ALREADY_ATTACHED(3047, "Uploaded asset is no longer available for attachment.", HttpStatus.CONFLICT),
+    UPLOAD_ASSET_PURPOSE_MISMATCH(3048, "Uploaded asset cannot be used for this field.", HttpStatus.BAD_REQUEST),
     //range 4xxx
     UNCATEGORIZED_EXCEPTION(4000, "There was error happen during run time", HttpStatus.INTERNAL_SERVER_ERROR),
     INVALID_ERROR_KEY(4001, "The error key could be misspelled", HttpStatus.INTERNAL_SERVER_ERROR),
@@ -127,6 +130,7 @@ public enum ErrorCode {
     FORBIDDEN_PROFILE_INCOMPLETE(4013, "Please complete your individual profile to booking", HttpStatus.FORBIDDEN),
     FORBIDDEN_BOOKING_ACCESS(4014, "Can not view detail/edit booking of another account", HttpStatus.FORBIDDEN),
     INVALID_CSRF_TOKEN(4015, "Invalid or missing CSRF token. Access denied.", HttpStatus.FORBIDDEN),
+    UPLOAD_ASSET_NOT_OWNED(4016, "Uploaded asset does not belong to this account.", HttpStatus.FORBIDDEN),
 
     ;
 

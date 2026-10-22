@@ -6,7 +6,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Min;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
-import org.springframework.web.multipart.MultipartFile;
 
 /**
  * Represents the request payload for update a new car.
@@ -59,31 +58,24 @@ public class EditCarRequest {
 
     @Schema(example = "VERIFIED", description = "The status of this car")
     ECarStatus status;
-    @ValidDocument(message = "INVALID_DOCUMENT_FILE")
-    @Schema(type = "string", format = "binary", description = "Registration paper file (.doc, .docx, .pdf, .jpeg, .jpg, .png)")
-    MultipartFile registrationPaper;
+    @Schema(description = "Optional replacement registration paper asset ID")
+    String registrationPaperAssetId;
 
-    @ValidDocument(message = "INVALID_DOCUMENT_FILE")
-    @Schema(type = "string", format = "binary", description = "Certificate of inspection file (.doc, .docx, .pdf, .jpeg, .jpg, .png)")
-    MultipartFile certificateOfInspection;
+    @Schema(description = "Optional replacement inspection certificate asset ID")
+    String certificateOfInspectionAssetId;
 
-    @ValidDocument(message = "INVALID_DOCUMENT_FILE")
-    @Schema(type = "string", format = "binary", description = "Insurance file (.doc, .docx, .pdf, .jpeg, .jpg, .png)")
-    MultipartFile insurance;
-    //  MultipartFile**
-    @ValidImageCar(message = "INVALID_CAR_IMAGE_FILE")
-    @Schema(type = "string", format = "binary", description = "Car's front side image (.jpg, .jpeg, .png, .gif)")
-    MultipartFile carImageFront;
+    @Schema(description = "Optional replacement insurance asset ID")
+    String insuranceAssetId;
 
-    @ValidImageCar(message = "INVALID_CAR_IMAGE_FILE")
-    @Schema(type = "string", format = "binary", description = "Car's back side image (.jpg, .jpeg, .png, .gif)")
-    MultipartFile carImageBack;
+    @Schema(description = "Optional replacement front image asset ID")
+    String carImageFrontAssetId;
 
-    @ValidImageCar(message = "INVALID_CAR_IMAGE_FILE")
-    @Schema(type = "string", format = "binary", description = "Car's left side image (.jpg, .jpeg, .png, .gif)")
-    MultipartFile carImageLeft;
+    @Schema(description = "Optional replacement back image asset ID")
+    String carImageBackAssetId;
 
-    @ValidImageCar(message = "INVALID_CAR_IMAGE_FILE")
-    @Schema(type = "string", format = "binary", description = "Car's right side image (.jpg, .jpeg, .png, .gif)")
-    MultipartFile carImageRight;
+    @Schema(description = "Optional replacement left image asset ID")
+    String carImageLeftAssetId;
+
+    @Schema(description = "Optional replacement right image asset ID")
+    String carImageRightAssetId;
 }

@@ -4,7 +4,6 @@ import com.mp.karental.validation.*;
 import jakarta.validation.constraints.*;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
 
@@ -46,8 +45,7 @@ public class EditProfileRequest {
     String ward;
     String houseNumberStreet;
 
-    @ValidDocument(message = "INVALID_IMAGE_FILE")
-    MultipartFile drivingLicense;
+    String drivingLicenseAssetId;
 
     @RequiredField(fieldName = "Email")
     @Email(message = "INVALID_EMAIL")

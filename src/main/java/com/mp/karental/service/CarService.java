@@ -2,6 +2,7 @@ package com.mp.karental.service;
 
 import com.mp.karental.constant.EBookingStatus;
 import com.mp.karental.constant.ECarStatus;
+import com.mp.karental.constant.EUploadPurpose;
 import com.mp.karental.dto.request.car.AddCarRequest;
 import com.mp.karental.dto.request.car.CarDetailRequest;
 import com.mp.karental.dto.request.car.EditCarRequest;
@@ -13,6 +14,7 @@ import com.mp.karental.dto.response.car.CarThumbnailResponse;
 import com.mp.karental.entity.Account;
 import com.mp.karental.entity.Booking;
 import com.mp.karental.entity.Car;
+import com.mp.karental.entity.UploadAsset;
 import com.mp.karental.exception.AppException;
 import com.mp.karental.exception.ErrorCode;
 import com.mp.karental.mapper.CarMapper;
@@ -29,7 +31,6 @@ import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.Sort;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -45,13 +46,13 @@ import java.util.*;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-@Transactional
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 public class CarService {
 
     CarRepository carRepository;
     CarMapper carMapper;
     FileService fileService;
+    UploadAssetService uploadAssetService;
     BookingRepository bookingRepository;
     EmailService emailService;
     RedisUtil redisUtil;
@@ -68,6 +69,7 @@ public class CarService {
      * @return The response object containing the newly added car details.
      * @throws AppException If the account is not found in the database.
      */
+    @Transactional
     public CarResponse addNewCar(AddCarRequest request) throws AppException {
         // Get the current user account id
         String accountId = SecurityUtil.getCurrentAccountId();
@@ -93,14 +95,13 @@ public class CarService {
         // Set car address components from request
         setCarAddress(request, car);
 
-        // Save the initial car entity in the database
+        // Save first so the car has an ID for the upload asset ownership records.
         car = carRepository.save(car);
 
-        // Process and upload car-related files
+        // Attach the already-uploaded assets to this car.
         processUploadFiles(request, accountId, car);
 
-        // Save the updated car entity after processing files
-        car = carRepository.save(car);
+        // The car is managed in this transaction, so Hibernate saves these changes at commit.
 
         // Map the saved car entity to a response object
         CarResponse carResponse = carMapper.toCarResponse(car);
@@ -126,6 +127,7 @@ public class CarService {
      * @return The response object containing the updated car details.
      * @throws AppException If the account or car is not found in the database.
      */
+    @Transactional
     public CarResponse editCar(EditCarRequest request, String id) throws AppException {
         // Retrieve the current user account ID to ensure the user is logged in
         String accountId = SecurityUtil.getCurrentAccountId();
@@ -196,10 +198,15 @@ public class CarService {
         if (currentStatus == newStatus) {
             return true;  // If the current status and new status are the same, return true (valid).
         }
-        return switch (currentStatus) {  // Switch statement to handle transitions based on the current status.
-            case NOT_VERIFIED, VERIFIED -> newStatus == ECarStatus.STOPPED;  // Can transition to STOPPED.
-            case STOPPED -> newStatus == ECarStatus.NOT_VERIFIED;  // Can transition to NOT_VERIFIED.
-        };
+        // Unverified and verified cars can be stopped by their owner.
+        if (currentStatus == ECarStatus.NOT_VERIFIED || currentStatus == ECarStatus.VERIFIED) {
+            return newStatus == ECarStatus.STOPPED;
+        }
+        // A stopped car must return to verification before it becomes available again.
+        if (currentStatus == ECarStatus.STOPPED) {
+            return newStatus == ECarStatus.NOT_VERIFIED;
+        }
+        return false;
     }
 
     /**
@@ -256,13 +263,13 @@ public class CarService {
      * Set URLs for car response to avoid duplication.
      */
     private void setCarResponseUrls(CarResponse response, Car car) {
-        response.setRegistrationPaperUrl(fileService.getFileUrl(car.getRegistrationPaperUri()));
-        response.setCertificateOfInspectionUrl(fileService.getFileUrl(car.getCertificateOfInspectionUri()));
-        response.setInsuranceUrl(fileService.getFileUrl(car.getInsuranceUri()));
-        response.setCarImageFrontUrl(fileService.getFileUrl(car.getCarImageFront()));
-        response.setCarImageBackUrl(fileService.getFileUrl(car.getCarImageBack()));
-        response.setCarImageLeftUrl(fileService.getFileUrl(car.getCarImageLeft()));
-        response.setCarImageRightUrl(fileService.getFileUrl(car.getCarImageRight()));
+        response.setRegistrationPaperUrl(fileService.getFileUrl(car.getRegistrationPaperAsset(), car.getRegistrationPaperUri()));
+        response.setCertificateOfInspectionUrl(fileService.getFileUrl(car.getCertificateOfInspectionAsset(), car.getCertificateOfInspectionUri()));
+        response.setInsuranceUrl(fileService.getFileUrl(car.getInsuranceAsset(), car.getInsuranceUri()));
+        response.setCarImageFrontUrl(fileService.getFileUrl(car.getCarImageFrontAsset(), car.getCarImageFront()));
+        response.setCarImageBackUrl(fileService.getFileUrl(car.getCarImageBackAsset(), car.getCarImageBack()));
+        response.setCarImageLeftUrl(fileService.getFileUrl(car.getCarImageLeftAsset(), car.getCarImageLeft()));
+        response.setCarImageRightUrl(fileService.getFileUrl(car.getCarImageRightAsset(), car.getCarImageRight()));
     }
 
     /**
@@ -305,113 +312,104 @@ public class CarService {
      * @param car       The car entity to which the file URIs will be assigned.
      * @throws AppException If file upload fails.
      */
-    private void processUploadFiles(Object request, String accountId, Car car) throws AppException {
+    private void processUploadFiles(AddCarRequest request, String accountId, Car car) {
+        // Attach the three required documents to the new car.
+        var registrationPaper = attachAsset(request.getRegistrationPaperAssetId(), EUploadPurpose.CAR_DOCUMENT, accountId, car);
+        car.setRegistrationPaperAsset(registrationPaper);
+        car.setRegistrationPaperUri(registrationPaper.getPublicId());
 
-        // Generate base URIs for storing documents and images in S3
-        String baseDocumentsUri = String.format("car/%s/%s/documents/", accountId, car.getId());
-        String baseImagesUri = String.format("car/%s/%s/images/", accountId, car.getId());
+        var inspectionCertificate = attachAsset(request.getCertificateOfInspectionAssetId(), EUploadPurpose.CAR_DOCUMENT, accountId, car);
+        car.setCertificateOfInspectionAsset(inspectionCertificate);
+        car.setCertificateOfInspectionUri(inspectionCertificate.getPublicId());
 
-        // Initialize file storage keys for car images
-        String s3KeyImageFront;
-        String s3KeyImageBack;
-        String s3KeyImageLeft;
-        String s3KeyImageRight;
+        var insurance = attachAsset(request.getInsuranceAssetId(), EUploadPurpose.CAR_DOCUMENT, accountId, car);
+        car.setInsuranceAsset(insurance);
+        car.setInsuranceUri(insurance.getPublicId());
 
-        // Initialize document and image file variables
-        MultipartFile registrationPaper;
-        MultipartFile certificateOfInspection;
-        MultipartFile insurance;
-        MultipartFile imageFront;
-        MultipartFile imageBack;
-        MultipartFile imageLeft;
-        MultipartFile imageRight;
+        // Attach the four required car images to the new car.
+        var frontImage = attachAsset(request.getCarImageFrontAssetId(), EUploadPurpose.CAR_IMAGE, accountId, car);
+        car.setCarImageFrontAsset(frontImage);
+        car.setCarImageFront(frontImage.getPublicId());
 
-        // If the request is an AddCarRequest, handle document and image uploads
-        if (request instanceof AddCarRequest addCarRequest) {
-            registrationPaper = addCarRequest.getRegistrationPaper();
-            certificateOfInspection = addCarRequest.getCertificateOfInspection();
-            insurance = addCarRequest.getInsurance();
-            imageFront = addCarRequest.getCarImageFront();
-            imageBack = addCarRequest.getCarImageBack();
-            imageLeft = addCarRequest.getCarImageLeft();
-            imageRight = addCarRequest.getCarImageRight();
+        var backImage = attachAsset(request.getCarImageBackAssetId(), EUploadPurpose.CAR_IMAGE, accountId, car);
+        car.setCarImageBackAsset(backImage);
+        car.setCarImageBack(backImage.getPublicId());
 
-            // Construct S3 keys for document files
-            String s3KeyRegistration = baseDocumentsUri + "registration-paper" + fileService.getFileExtension(registrationPaper);
-            String s3KeyCertificate = baseDocumentsUri + "certificate-of-inspection" + fileService.getFileExtension(certificateOfInspection);
-            String s3KeyInsurance = baseDocumentsUri + "insurance" + fileService.getFileExtension(insurance);
+        var leftImage = attachAsset(request.getCarImageLeftAssetId(), EUploadPurpose.CAR_IMAGE, accountId, car);
+        car.setCarImageLeftAsset(leftImage);
+        car.setCarImageLeft(leftImage.getPublicId());
 
-            s3KeyImageFront = baseImagesUri + "front" + fileService.getFileExtension(imageFront);
-            s3KeyImageBack = baseImagesUri + "back" + fileService.getFileExtension(imageBack);
-            s3KeyImageLeft = baseImagesUri + "left" + fileService.getFileExtension(imageLeft);
-            s3KeyImageRight = baseImagesUri + "right" + fileService.getFileExtension(imageRight);
-
-            // Upload document files to S3
-            fileService.uploadFile(registrationPaper, s3KeyRegistration);
-            fileService.uploadFile(certificateOfInspection, s3KeyCertificate);
-            fileService.uploadFile(insurance, s3KeyInsurance);
-
-            fileService.uploadFile(imageFront, s3KeyImageFront);
-            fileService.uploadFile(imageBack, s3KeyImageBack);
-            fileService.uploadFile(imageLeft, s3KeyImageLeft);
-            fileService.uploadFile(imageRight, s3KeyImageRight);
-
-            // Set document URIs in the car object
-            car.setRegistrationPaperUri(s3KeyRegistration);
-            car.setCertificateOfInspectionUri(s3KeyCertificate);
-            car.setInsuranceUri(s3KeyInsurance);
-            // Set image URIs in the car object
-            car.setCarImageFront(s3KeyImageFront);
-            car.setCarImageBack(s3KeyImageBack);
-            car.setCarImageLeft(s3KeyImageLeft);
-            car.setCarImageRight(s3KeyImageRight);
-        }
-
-        // If the request is an EditCarRequest, only update image files
-        if (request instanceof EditCarRequest editCarRequest) {
-            //when car status is not verify, owner can change the documents to have valid document to verify by operator
-            if (car.getStatus() == ECarStatus.NOT_VERIFIED || car.getStatus() == ECarStatus.STOPPED) {
-                if (editCarRequest.getRegistrationPaper() != null && !editCarRequest.getRegistrationPaper().isEmpty()) {
-                    String s3KeyRegistration = baseDocumentsUri + "registration-paper" + fileService.getFileExtension(editCarRequest.getRegistrationPaper());
-                    fileService.uploadFile(editCarRequest.getRegistrationPaper(), s3KeyRegistration);
-                    car.setRegistrationPaperUri(s3KeyRegistration);
-                }
-                if (editCarRequest.getCertificateOfInspection() != null && !editCarRequest.getCertificateOfInspection().isEmpty()) {
-                    String s3KeyCertificate = baseDocumentsUri + "certificate-of-inspection" + fileService.getFileExtension(editCarRequest.getCertificateOfInspection());
-                    fileService.uploadFile(editCarRequest.getCertificateOfInspection(), s3KeyCertificate);
-                    car.setCertificateOfInspectionUri(s3KeyCertificate);
-                }
-                if (editCarRequest.getInsurance() != null && !editCarRequest.getInsurance().isEmpty()) {
-                    String s3KeyInsurance = baseDocumentsUri + "insurance" + fileService.getFileExtension(editCarRequest.getInsurance());
-                    fileService.uploadFile(editCarRequest.getInsurance(), s3KeyInsurance);
-                    car.setInsuranceUri(s3KeyInsurance);
-                }
-            }
-
-            if (editCarRequest.getCarImageFront() != null && !editCarRequest.getCarImageFront().isEmpty()) {
-                s3KeyImageFront = baseImagesUri + "front" + fileService.getFileExtension(editCarRequest.getCarImageFront());
-                fileService.uploadFile(editCarRequest.getCarImageFront(), s3KeyImageFront);
-                car.setCarImageFront(s3KeyImageFront);
-            }
-            if (editCarRequest.getCarImageBack() != null && !editCarRequest.getCarImageBack().isEmpty()) {
-                s3KeyImageBack = baseImagesUri + "back" + fileService.getFileExtension(((EditCarRequest) request).getCarImageBack());
-                fileService.uploadFile(((EditCarRequest) request).getCarImageBack(), s3KeyImageBack);
-                car.setCarImageBack(s3KeyImageBack);
-            }
-            if (editCarRequest.getCarImageLeft() != null && !editCarRequest.getCarImageLeft().isEmpty()) {
-                s3KeyImageLeft = baseImagesUri + "left" + fileService.getFileExtension(editCarRequest.getCarImageLeft());
-                fileService.uploadFile(editCarRequest.getCarImageLeft(), s3KeyImageLeft);
-                car.setCarImageLeft(s3KeyImageLeft);
-            }
-            if (editCarRequest.getCarImageRight() != null && !(editCarRequest.getCarImageRight().isEmpty())) {
-                s3KeyImageRight = baseImagesUri + "right" + fileService.getFileExtension(editCarRequest.getCarImageRight());
-                fileService.uploadFile(editCarRequest.getCarImageRight(), s3KeyImageRight);
-                car.setCarImageRight(s3KeyImageRight);
-            }
-        }
-
+        var rightImage = attachAsset(request.getCarImageRightAssetId(), EUploadPurpose.CAR_IMAGE, accountId, car);
+        car.setCarImageRightAsset(rightImage);
+        car.setCarImageRight(rightImage.getPublicId());
     }
 
+    private void processUploadFiles(EditCarRequest request, String accountId, Car car) {
+        boolean mayReplaceDocuments = car.getStatus() == ECarStatus.NOT_VERIFIED || car.getStatus() == ECarStatus.STOPPED;
+        if (mayReplaceDocuments) {
+            // Owners may replace documents only while the car is not verified or is stopped.
+            if (request.getRegistrationPaperAssetId() != null && !request.getRegistrationPaperAssetId().isBlank()) {
+                var oldRegistrationPaper = car.getRegistrationPaperAsset();
+                var newRegistrationPaper = attachAsset(request.getRegistrationPaperAssetId(), EUploadPurpose.CAR_DOCUMENT, accountId, car);
+                car.setRegistrationPaperAsset(newRegistrationPaper);
+                car.setRegistrationPaperUri(newRegistrationPaper.getPublicId());
+                uploadAssetService.markForDeletion(oldRegistrationPaper);
+            }
+
+            if (request.getCertificateOfInspectionAssetId() != null && !request.getCertificateOfInspectionAssetId().isBlank()) {
+                var oldInspectionCertificate = car.getCertificateOfInspectionAsset();
+                var newInspectionCertificate = attachAsset(request.getCertificateOfInspectionAssetId(), EUploadPurpose.CAR_DOCUMENT, accountId, car);
+                car.setCertificateOfInspectionAsset(newInspectionCertificate);
+                car.setCertificateOfInspectionUri(newInspectionCertificate.getPublicId());
+                uploadAssetService.markForDeletion(oldInspectionCertificate);
+            }
+
+            if (request.getInsuranceAssetId() != null && !request.getInsuranceAssetId().isBlank()) {
+                var oldInsurance = car.getInsuranceAsset();
+                var newInsurance = attachAsset(request.getInsuranceAssetId(), EUploadPurpose.CAR_DOCUMENT, accountId, car);
+                car.setInsuranceAsset(newInsurance);
+                car.setInsuranceUri(newInsurance.getPublicId());
+                uploadAssetService.markForDeletion(oldInsurance);
+            }
+        }
+
+        // Owners may replace car images regardless of the car verification status.
+        if (request.getCarImageFrontAssetId() != null && !request.getCarImageFrontAssetId().isBlank()) {
+            var oldFrontImage = car.getCarImageFrontAsset();
+            var newFrontImage = attachAsset(request.getCarImageFrontAssetId(), EUploadPurpose.CAR_IMAGE, accountId, car);
+            car.setCarImageFrontAsset(newFrontImage);
+            car.setCarImageFront(newFrontImage.getPublicId());
+            uploadAssetService.markForDeletion(oldFrontImage);
+        }
+
+        if (request.getCarImageBackAssetId() != null && !request.getCarImageBackAssetId().isBlank()) {
+            var oldBackImage = car.getCarImageBackAsset();
+            var newBackImage = attachAsset(request.getCarImageBackAssetId(), EUploadPurpose.CAR_IMAGE, accountId, car);
+            car.setCarImageBackAsset(newBackImage);
+            car.setCarImageBack(newBackImage.getPublicId());
+            uploadAssetService.markForDeletion(oldBackImage);
+        }
+
+        if (request.getCarImageLeftAssetId() != null && !request.getCarImageLeftAssetId().isBlank()) {
+            var oldLeftImage = car.getCarImageLeftAsset();
+            var newLeftImage = attachAsset(request.getCarImageLeftAssetId(), EUploadPurpose.CAR_IMAGE, accountId, car);
+            car.setCarImageLeftAsset(newLeftImage);
+            car.setCarImageLeft(newLeftImage.getPublicId());
+            uploadAssetService.markForDeletion(oldLeftImage);
+        }
+
+        if (request.getCarImageRightAssetId() != null && !request.getCarImageRightAssetId().isBlank()) {
+            var oldRightImage = car.getCarImageRightAsset();
+            var newRightImage = attachAsset(request.getCarImageRightAssetId(), EUploadPurpose.CAR_IMAGE, accountId, car);
+            car.setCarImageRightAsset(newRightImage);
+            car.setCarImageRight(newRightImage.getPublicId());
+            uploadAssetService.markForDeletion(oldRightImage);
+        }
+    }
+
+    private UploadAsset attachAsset(String assetId, EUploadPurpose purpose, String accountId, Car car) {
+        return uploadAssetService.attach(assetId, purpose, "CAR", car.getId(), accountId, false);
+    }
     /**
      * Retrieves a paginated list of cars belonging to the current user.
      *
@@ -420,6 +418,7 @@ public class CarService {
      * @param sort The sorting criteria in the format "field,direction".
      * @return A paginated list of car thumbnails.
      */
+    @Transactional(readOnly = true)
     public Page<CarThumbnailResponse> getCarsByUserId(int page, int size, String sort) {
         String accountId = SecurityUtil.getCurrentAccountId();
 
@@ -433,10 +432,10 @@ public class CarService {
         return cars.map(car -> {
             CarThumbnailResponse response = carMapper.toCarThumbnailResponse(car);
             response.setAddress(car.getWard() + ", " + car.getCityProvince());
-            response.setCarImageFront(fileService.getFileUrl(car.getCarImageFront()));
-            response.setCarImageBack(fileService.getFileUrl(car.getCarImageBack()));
-            response.setCarImageLeft(fileService.getFileUrl(car.getCarImageLeft()));
-            response.setCarImageRight(fileService.getFileUrl(car.getCarImageRight()));
+            response.setCarImageFront(fileService.getFileUrl(car.getCarImageFrontAsset(), car.getCarImageFront()));
+            response.setCarImageBack(fileService.getFileUrl(car.getCarImageBackAsset(), car.getCarImageBack()));
+            response.setCarImageLeft(fileService.getFileUrl(car.getCarImageLeftAsset(), car.getCarImageLeft()));
+            response.setCarImageRight(fileService.getFileUrl(car.getCarImageRightAsset(), car.getCarImageRight()));
 
             // Call the reusable method to get the rating
             response.setAverageRatingByCar(getAverageRatingByCar(car.getId()));
@@ -454,6 +453,7 @@ public class CarService {
      * @param request CarDetailRequest object with carId, pickUp, and dropOff times.
      * @return CarDetailResponse containing car details, booking status, images, and address visibility.
      */
+    @Transactional(readOnly = true)
     public CarDetailResponse getCarDetail(CarDetailRequest request) {
         String accountId = SecurityUtil.getCurrentAccountId();
 
@@ -530,9 +530,9 @@ public class CarService {
                     + car.getCityProvince());
 
             // Allow viewing and downloading car-related documents
-            response.setCertificateOfInspectionUrl(fileService.getFileUrl(car.getCertificateOfInspectionUri()));
-            response.setInsuranceUrl(fileService.getFileUrl(car.getInsuranceUri()));
-            response.setRegistrationPaperUrl(fileService.getFileUrl(car.getRegistrationPaperUri()));
+            response.setCertificateOfInspectionUrl(fileService.getFileUrl(car.getCertificateOfInspectionAsset(), car.getCertificateOfInspectionUri()));
+            response.setInsuranceUrl(fileService.getFileUrl(car.getInsuranceAsset(), car.getInsuranceUri()));
+            response.setRegistrationPaperUrl(fileService.getFileUrl(car.getRegistrationPaperAsset(), car.getRegistrationPaperUri()));
 
         } else {
             // If the booking status is CANCELLED or PENDING_DEPOSIT, hide document URLs and provide a partial address
@@ -551,10 +551,10 @@ public class CarService {
         response.setInsuranceIsVerified(car.isInsuranceUriIsVerified());
 
         // Retrieve and set the URLs for car-related images (these should always be visible)
-        response.setCarImageFront(fileService.getFileUrl(car.getCarImageFront()));
-        response.setCarImageBack(fileService.getFileUrl(car.getCarImageBack()));
-        response.setCarImageLeft(fileService.getFileUrl(car.getCarImageLeft()));
-        response.setCarImageRight(fileService.getFileUrl(car.getCarImageRight()));
+        response.setCarImageFront(fileService.getFileUrl(car.getCarImageFrontAsset(), car.getCarImageFront()));
+        response.setCarImageBack(fileService.getFileUrl(car.getCarImageBackAsset(), car.getCarImageBack()));
+        response.setCarImageLeft(fileService.getFileUrl(car.getCarImageLeftAsset(), car.getCarImageLeft()));
+        response.setCarImageRight(fileService.getFileUrl(car.getCarImageRightAsset(), car.getCarImageRight()));
 
         // Set booking status in the response
         response.setBooked(isBooked);
@@ -578,6 +578,7 @@ public class CarService {
      * @param dropOffTime the end time of the requested booking
      * @return true if the car is available, false otherwise
      */
+    @Transactional(readOnly = true)
     public boolean isCarAvailable(String carId, LocalDateTime pickUpTime, LocalDateTime dropOffTime) {
         // Get list booking in range (pickUp - 1 day) to (dropOff + 1 day) to catch any potential overlaps
         LocalDateTime searchStart = pickUpTime.minusDays(1);
@@ -651,6 +652,7 @@ public class CarService {
      * @param accountId the ID of the customer
      * @return true if the car is booked by account ID, false otherwise
      */
+    @Transactional(readOnly = true)
     public boolean isCarBooked(String carId, String accountId) {
         List<EBookingStatus> activeStatuses = Arrays.asList(
                 EBookingStatus.CONFIRMED,
@@ -710,6 +712,7 @@ public class CarService {
      * @return A paginated list of available cars.
      */
 
+    @Transactional(readOnly = true)
     public Page<CarThumbnailResponse> searchCars(SearchCarRequest request, int page, int size, String sort) {
         log.info("Search request received - Address: {}, PickUp: {}, DropOff: {}",
                 request.getAddress(), request.getPickUpTime(), request.getDropOffTime());
@@ -779,10 +782,10 @@ public class CarService {
             response.setAverageRatingByCar(getAverageRatingByCar(car.getId()));
 
             // Get URL image car
-            response.setCarImageFront(fileService.getFileUrl(car.getCarImageFront()));
-            response.setCarImageBack(fileService.getFileUrl(car.getCarImageBack()));
-            response.setCarImageLeft(fileService.getFileUrl(car.getCarImageLeft()));
-            response.setCarImageRight(fileService.getFileUrl(car.getCarImageRight()));
+            response.setCarImageFront(fileService.getFileUrl(car.getCarImageFrontAsset(), car.getCarImageFront()));
+            response.setCarImageBack(fileService.getFileUrl(car.getCarImageBackAsset(), car.getCarImageBack()));
+            response.setCarImageLeft(fileService.getFileUrl(car.getCarImageLeftAsset(), car.getCarImageLeft()));
+            response.setCarImageRight(fileService.getFileUrl(car.getCarImageRightAsset(), car.getCarImageRight()));
             response.setNoOfRides(noOfRides);
             availableCars.add(response);
         }
@@ -805,6 +808,7 @@ public class CarService {
      * @return A CarResponse object containing the car details.
      * @throws AppException If the account is not found, the car is not found, or the user is unauthorized.
      */
+    @Transactional(readOnly = true)
     public CarResponse getCarById(String id) {
         // Retrieve the current user account ID to ensure the user is logged in
         String accountId = SecurityUtil.getCurrentAccountId();
@@ -848,9 +852,13 @@ public class CarService {
      * @param carId The ID of the car to fetch the average rating for.
      * @return The average rating if feedback exists; otherwise, returns 0.0.
      */
+    @Transactional(readOnly = true)
     public double getAverageRatingByCar(String carId) {
         Double averageRating = feedbackRepository.calculateAverageRatingByCar(carId);
-        return (averageRating != null) ? averageRating : 0.0;
+        if (averageRating == null) {
+            return 0.0;
+        }
+        return averageRating;
     }
 
     /**
@@ -863,6 +871,7 @@ public class CarService {
      * @param status (Optional) The status filter for cars.
      * @return A page of CarThumbnailResponse objects containing summarized car information.
      */
+    @Transactional(readOnly = true)
     public Page<CarThumbnailResponse> getAllCarsForOperator(int page, int size, String sort, ECarStatus status) {
         log.info("Operator {} is requesting all cars with status {}", SecurityUtil.getCurrentAccountId(), status);
 
@@ -881,10 +890,10 @@ public class CarService {
             response.setAddress(car.getWard() + ", " + car.getCityProvince());
 
             // Retrieve and set car images from the file storage system
-            response.setCarImageFront(fileService.getFileUrl(car.getCarImageFront()));
-            response.setCarImageBack(fileService.getFileUrl(car.getCarImageBack()));
-            response.setCarImageLeft(fileService.getFileUrl(car.getCarImageLeft()));
-            response.setCarImageRight(fileService.getFileUrl(car.getCarImageRight()));
+            response.setCarImageFront(fileService.getFileUrl(car.getCarImageFrontAsset(), car.getCarImageFront()));
+            response.setCarImageBack(fileService.getFileUrl(car.getCarImageBackAsset(), car.getCarImageBack()));
+            response.setCarImageLeft(fileService.getFileUrl(car.getCarImageLeftAsset(), car.getCarImageLeft()));
+            response.setCarImageRight(fileService.getFileUrl(car.getCarImageRightAsset(), car.getCarImageRight()));
 
             // Get the average rating of the car based on user reviews
             response.setAverageRatingByCar(getAverageRatingByCar(car.getId()));
@@ -907,7 +916,9 @@ public class CarService {
      */
     private Pageable createPageableForOperator(int page, int size, String sort) {
         // Ensure the page size is within a valid range (default 10, max 100)
-        size = (size > 0 && size <= 100) ? size : 10;
+        if (size <= 0 || size > 100) {
+            size = 10;
+        }
 
         // Ensure the page index is non-negative
         page = Math.max(page, 0);
@@ -923,7 +934,10 @@ public class CarService {
             if (sortParams.length == 2) {
                 String requestedField = sortParams[0].trim();
                 String requestedDirection = sortParams[1].trim().toUpperCase();
-                Sort.Direction direction = "ASC".equals(requestedDirection) ? Sort.Direction.ASC : Sort.Direction.DESC;
+                Sort.Direction direction = Sort.Direction.DESC;
+                if ("ASC".equals(requestedDirection)) {
+                    direction = Sort.Direction.ASC;
+                }
 
                 // Apply sorting only if the requested field is allowed
                 if (allowedSortFields.contains(requestedField)) {
@@ -966,9 +980,9 @@ public class CarService {
 
         // Map entity to DTO and update URLs
         return carMapper.toCarDocumentsResponse(car).toBuilder()
-                .registrationPaperUrl(fileService.getFileUrl(car.getRegistrationPaperUri()))
-                .certificateOfInspectionUrl(fileService.getFileUrl(car.getCertificateOfInspectionUri()))
-                .insuranceUrl(fileService.getFileUrl(car.getInsuranceUri()))
+                .registrationPaperUrl(fileService.getFileUrl(car.getRegistrationPaperAsset(), car.getRegistrationPaperUri()))
+                .certificateOfInspectionUrl(fileService.getFileUrl(car.getCertificateOfInspectionAsset(), car.getCertificateOfInspectionUri()))
+                .insuranceUrl(fileService.getFileUrl(car.getInsuranceAsset(), car.getInsuranceUri()))
                 .build();
     }
 

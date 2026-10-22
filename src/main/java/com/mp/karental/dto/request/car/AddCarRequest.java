@@ -3,10 +3,10 @@ package com.mp.karental.dto.request.car;
 import com.mp.karental.validation.*;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
-import org.springframework.web.multipart.MultipartFile;
 
 /**
  * Represents the request payload for add a new car.
@@ -100,39 +100,32 @@ public class AddCarRequest {
     boolean isGasoline;
 
     // Document files
-    @ValidDocument(message = "INVALID_DOCUMENT_FILE")
-    @RequiredField(fieldName = "Registration paper")
-    @Schema(type = "string", format = "binary", description = "Registration paper file (.doc, .docx, .pdf, .jpeg, .jpg, .png)")
-    MultipartFile registrationPaper;
+    @NotBlank(message = "REQUIRED_FIELD")
+    @RequiredField(fieldName = "Registration paper asset ID")
+    String registrationPaperAssetId;
 
-    @ValidDocument(message = "INVALID_DOCUMENT_FILE")
-    @RequiredField(fieldName = "Certificate of inspection")
-    @Schema(type = "string", format = "binary", description = "Certificate of inspection file (.doc, .docx, .pdf, .jpeg, .jpg, .png)")
-    MultipartFile certificateOfInspection;
+    @NotBlank(message = "REQUIRED_FIELD")
+    @RequiredField(fieldName = "Certificate of inspection asset ID")
+    String certificateOfInspectionAssetId;
 
-    @ValidDocument(message = "INVALID_DOCUMENT_FILE")
-    @RequiredField(fieldName = "Insurance")
-    @Schema(type = "string", format = "binary", description = "Insurance file (.doc, .docx, .pdf, .jpeg, .jpg, .png)")
-    MultipartFile insurance;
+    @NotBlank(message = "REQUIRED_FIELD")
+    @RequiredField(fieldName = "Insurance asset ID")
+    String insuranceAssetId;
 
     // Car images
-    @RequiredField(fieldName = "Car's front side image")
-    @ValidImageCar(message = "INVALID_CAR_IMAGE_FILE")
-    @Schema(type = "string", format = "binary", description = "Car's front side image (.jpg, .jpeg, .png, .gif)")
-    MultipartFile carImageFront;
+    @NotBlank(message = "REQUIRED_FIELD")
+    @RequiredField(fieldName = "Car's front side image asset ID")
+    String carImageFrontAssetId;
 
-    @RequiredField(fieldName = "Car's back side image")
-    @ValidImageCar(message = "INVALID_CAR_IMAGE_FILE")
-    @Schema(type = "string", format = "binary", description = "Car's back side image (.jpg, .jpeg, .png, .gif)")
-    MultipartFile carImageBack;
+    @NotBlank(message = "REQUIRED_FIELD")
+    @RequiredField(fieldName = "Car's back side image asset ID")
+    String carImageBackAssetId;
 
-    @RequiredField(fieldName = "Car's left side image")
-    @ValidImageCar(message = "INVALID_CAR_IMAGE_FILE")
-    @Schema(type = "string", format = "binary", description = "Car's left side image (.jpg, .jpeg, .png, .gif)")
-    MultipartFile carImageLeft;
+    @NotBlank(message = "REQUIRED_FIELD")
+    @RequiredField(fieldName = "Car's left side image asset ID")
+    String carImageLeftAssetId;
 
-    @RequiredField(fieldName = "Car's right side image")
-    @ValidImageCar(message = "INVALID_CAR_IMAGE_FILE")
-    @Schema(type = "string", format = "binary", description = "Car's right side image (.jpg, .jpeg, .png, .gif)")
-    MultipartFile carImageRight;
+    @NotBlank(message = "REQUIRED_FIELD")
+    @RequiredField(fieldName = "Car's right side image asset ID")
+    String carImageRightAssetId;
 }

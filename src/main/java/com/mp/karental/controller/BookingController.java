@@ -98,8 +98,8 @@ public class BookingController {
                     ),
             }
     )
-    @PostMapping(value = "/customer/create-book", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    ApiResponse<BookingResponse> createBooking(@ModelAttribute @Valid CreateBookingRequest bookingRequest) {
+    @PostMapping(value = "/customer/create-book", consumes = MediaType.APPLICATION_JSON_VALUE)
+    ApiResponse<BookingResponse> createBooking(@RequestBody @Valid CreateBookingRequest bookingRequest) {
         log.info("create booking {}", bookingRequest);
         return ApiResponse.<BookingResponse>builder()
                 .data(bookingService.createBooking(bookingRequest))
@@ -165,8 +165,8 @@ public class BookingController {
                     ),
             }
     )
-    @PutMapping(value = "/customer/edit-book/{bookingNumber}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    ApiResponse<BookingResponse> editBooking(@ModelAttribute @Valid EditBookingRequest editBookingRequest, @PathVariable @Parameter(description = "The booking number to be edited", example = "BK202410200001") String bookingNumber)  {
+    @PutMapping(value = "/customer/edit-book/{bookingNumber}", consumes = MediaType.APPLICATION_JSON_VALUE)
+    ApiResponse<BookingResponse> editBooking(@RequestBody @Valid EditBookingRequest editBookingRequest, @PathVariable @Parameter(description = "The booking number to be edited", example = "BK202410200001") String bookingNumber)  {
         log.info("edit booking {}", editBookingRequest);
         return ApiResponse.<BookingResponse>builder()
                 .data(bookingService.editBooking(editBookingRequest, bookingNumber))

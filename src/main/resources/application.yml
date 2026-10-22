@@ -17,6 +17,10 @@ application:
       csrf-token-cookie-name: karental-jwt-csrf
       csrf-token-secret-key: ${JWT_CSRF_SECRET_KEY}
       csrf-token-header-name: X-CSRF-TOKEN
+  upload:
+    max-file-size-bytes: 5242880
+    orphan-retention-hours: 24
+    cleanup-batch-size: 100
 #      access-token-expiration: 15000 #milisecond ~ 15s
 #      refresh-token-expiration: 60000 #~1 minute
     public-endpoints:

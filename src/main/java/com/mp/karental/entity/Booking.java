@@ -89,6 +89,12 @@ public class Booking {
     @Column(nullable = false)
     String driverDrivingLicenseUri;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "driver_driving_license_asset_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    UploadAsset driverDrivingLicenseAsset;
+
     @Column(nullable = false)
     String driverCityProvince;
 

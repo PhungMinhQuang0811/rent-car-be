@@ -2,7 +2,6 @@ package com.mp.karental.dto.request.booking;
 
 import com.mp.karental.validation.RequiredField;
 import com.mp.karental.validation.ValidAge;
-import com.mp.karental.validation.ValidDocument;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -10,7 +9,6 @@ import jakarta.validation.constraints.Past;
 import jakarta.validation.constraints.Pattern;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
 
@@ -48,9 +46,8 @@ public class EditBookingRequest {
     @Schema(example = "john.doe@example.com", description = "The email address of the driver")
     String driverEmail;
 
-    @ValidDocument(message = "INVALID_DOCUMENT_FILE")
-    @Schema(type = "string", format = "binary", description = "Driver driving license file (.doc, .docx, .pdf, .jpeg, .jpg, .png)")
-    MultipartFile driverDrivingLicense;
+    @Schema(description = "Optional replacement driver license asset ID")
+    String driverDrivingLicenseAssetId;
 
     @Schema(example = "Tỉnh Hà Giang", description = "The city or province of the driver")
     String driverCityProvince;

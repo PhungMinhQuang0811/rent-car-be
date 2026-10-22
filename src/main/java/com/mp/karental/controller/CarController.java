@@ -112,9 +112,8 @@ public class CarController {
                     ),
             }
     )
-    @PostMapping(value = "/car-owner/add-car", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ApiResponse<CarResponse> addNewCar(@ModelAttribute @Valid AddCarRequest request) {
-        log.info("add new car {}", request);
+    @PostMapping(value = "/car-owner/add-car", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ApiResponse<CarResponse> addNewCar(@RequestBody @Valid AddCarRequest request) {
         return ApiResponse.<CarResponse>builder()
                 .data(carService.addNewCar(request))
                 .build();
@@ -183,9 +182,8 @@ public class CarController {
                     ),
             }
     )
-    @PutMapping(value = "/car-owner/edit-car/{carId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ApiResponse<CarResponse> editCar(@ModelAttribute @Valid EditCarRequest request, @PathVariable @Parameter(description = "The ID of the car to be edited", example = "car1") String carId) {
-        log.info("edit car {}", request);
+    @PutMapping(value = "/car-owner/edit-car/{carId}", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ApiResponse<CarResponse> editCar(@RequestBody @Valid EditCarRequest request, @PathVariable @Parameter(description = "The ID of the car to be edited", example = "car1") String carId) {
         return ApiResponse.<CarResponse>builder()
                 .data(carService.editCar(request, carId))
                 .build();
